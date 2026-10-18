@@ -9,6 +9,7 @@ use glance_core::highlight::Highlighter;
 use glance_core::session::{LogFile, Polled};
 use glance_core::settings::{self, Config, State, ThemeChoice, WindowSize};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::progress::Progress;
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::{ActiveTheme as _, Sizable as _, Theme, ThemeMode, h_flex, v_flex};
@@ -298,7 +299,8 @@ impl GlanceApp {
         let (shown, total) = tab.counts();
         let (scanned, indexed) = (tab.file().index().read().unwrap().scanned(), tab.file().is_indexed());
         let size = tab.file().reader().len().unwrap_or(0);
-        let progress = if indexed || size == 0 { "indexed".to_owned() } else { format!("indexing {}%", scanned * 100 / size) };
+        let indexing = (!indexed && size > 0).then(|| (scanned * 100 / size) as f32);
+        let progress = indexing.map(|p| ("indexing", p)).or_else(|| tab.filter_progress().map(|p| ("filtering", p as f32)));
         let entries = if shown == total { format!("{total} entries") } else { format!("{shown} of {total} entries") };
         let message = tab.message().map(str::to_owned).or_else(|| self.message.clone());
         bar.child("UTF-8")
@@ -313,8 +315,17 @@ impl GlanceApp {
                     })),
             )
             .child(entries)
-            .child(progress)
+            .children(indexing.is_none().then_some("indexed"))
             .children(message)
+            .child(div().flex_1())
+            .children(progress.map(|(label, percent)| {
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(label)
+                    .child(div().w(px(120.)).child(Progress::new("progress").value(percent).accessibility_label(label)))
+                    .child(format!("{percent:.0}%"))
+            }))
     }
 }
 

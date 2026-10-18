@@ -78,6 +78,8 @@ pub struct Config {
     /// IANA name (e.g. `"UTC"`, `"Asia/Taipei"`) for timestamps that carry no
     /// zone. `None` means the local zone. A per-file choice overrides it.
     pub default_time_zone: Option<String>,
+    /// Entries kept visible around each Filter match (0 to 50).
+    pub filter_context: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

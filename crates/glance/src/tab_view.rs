@@ -120,7 +120,7 @@ impl TabView {
             let zone = resolve_time_zone(None, config.default_time_zone.as_deref()).unwrap_or(TimeZone::UTC);
             let rule = file.index().read().unwrap().rule();
             let ctx = FilterContext { format: file.format(), rule, zone };
-            let filter_bar = cx.new(|cx| FilterBar::new(window, cx));
+            let filter_bar = cx.new(|cx| FilterBar::new(config.filter_context, window, cx));
             cx.subscribe(&filter_bar, |this: &mut TabView, _, event: &FilterBarEvent, cx| {
                 let FilterBarEvent::Apply(filter) = event;
                 this.apply_filter(filter, cx);
@@ -201,6 +201,14 @@ impl TabView {
         (self.filter.as_ref().map_or(total, |(_, view)| view.len()), total)
     }
 
+    /// Percent of the file the Filter has examined, or `None` once it has caught up (or without a Filter).
+    pub fn filter_progress(&self) -> Option<usize> {
+        let (_, view) = self.filter.as_ref()?;
+        let total = self.file.index().read().unwrap().len();
+        let examined = view.examined();
+        (examined < total.saturating_sub(1)).then(|| examined * 100 / total.max(1))
+    }
+
     // ---- change detection --------------------------------------------------
 
     pub fn poll(&mut self, cx: &mut Context<Self>) -> std::io::Result<Polled> {
@@ -247,7 +255,6 @@ impl TabView {
         if *filter == glance_core::filter::Filter::default() {
             self.filter = None;
             self.filter_bar.update(cx, |bar, cx| bar.set_error(None, cx));
-            self.publish_unfiltered_summary(cx);
             self.pending_scroll = None;
             if let Some(entry) = top_entry {
                 self.list_scroll.scroll_to_item_strict(entry, ScrollStrategy::Top);
@@ -281,12 +288,6 @@ impl TabView {
         }
     }
 
-    /// Without a Filter every Entry is shown, and the total keeps growing while the file is indexed.
-    fn publish_unfiltered_summary(&mut self, cx: &mut Context<Self>) {
-        let total = self.file.index().read().unwrap().len();
-        self.filter_bar.update(cx, |bar, cx| bar.set_summary(format!("{total} of {total} entries"), cx));
-    }
-
     /// Advances background work a little. Returns whether there is more to do.
     fn work(&mut self, cx: &mut Context<Self>) -> bool {
         let filtering = self.work_filter(cx);
@@ -296,7 +297,6 @@ impl TabView {
 
     fn work_filter(&mut self, cx: &mut Context<Self>) -> bool {
         let Some((compiled, view)) = &mut self.filter else {
-            self.publish_unfiltered_summary(cx);
             return false;
         };
         let started = Instant::now();
@@ -322,12 +322,6 @@ impl TabView {
         let (examined, total) = (view.examined(), self.file.index().read().unwrap().len());
         let caught_up = !more && examined >= total.saturating_sub(1);
         let changed = view.len() != before || more;
-        let summary = format!(
-            "{} of {} entries{}",
-            view.len(),
-            total,
-            if caught_up { String::new() } else { format!(" · filtering {}%", examined * 100 / total.max(1)) }
-        );
         if let Some(entry) = self.pending_scroll.filter(|&entry| examined > entry || caught_up) {
             let row = self.filter.as_ref().map_or(0, |(_, v)| v.first_row_at_or_after(entry));
             self.list_scroll.scroll_to_item_strict(row, ScrollStrategy::Top);
@@ -340,7 +334,6 @@ impl TabView {
             }
             cx.notify();
         }
-        self.filter_bar.update(cx, |bar, cx| bar.set_summary(summary, cx));
         if changed {
             cx.notify();
         }

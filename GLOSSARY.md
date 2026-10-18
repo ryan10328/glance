@@ -41,7 +41,7 @@ A condition that hides every Entry not matching it, narrowing the view to the ma
 _Avoid_: Search, query
 
 **Context**:
-The Entries immediately before and after a given Entry. Shown either by temporarily lifting a Filter around one Entry, or by keeping N surrounding Entries visible around each Filter match.
+The Entries immediately before and after a given Entry. Shown either by temporarily lifting a Filter around one Entry, or by keeping N surrounding Entries visible around each Filter match, where N is the `filter_context` setting.
 _Avoid_: Surrounding lines, neighbors
 
 **Highlight**:

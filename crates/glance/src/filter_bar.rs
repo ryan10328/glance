@@ -32,22 +32,19 @@ pub struct FilterBar {
     /// The selection before a preset button was switched on, so that button can switch back.
     levels_before: Option<LevelFilter>,
     texts: Vec<TextRow>,
-    context: Entity<InputState>,
+    /// Entries kept around each match; a setting, not a field of the bar.
+    context: usize,
     error: Option<String>,
-    summary: SharedString,
 }
 
 impl FilterBar {
-    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let context = cx.new(|cx| InputState::new(window, cx).placeholder("0").default_value("0"));
-        Self::apply_on_enter(&context, window, cx);
+    pub fn new(context: usize, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let mut bar = Self {
             levels: LevelFilter::default(),
             levels_before: None,
             texts: Vec::new(),
-            context,
+            context: context.min(MAX_CONTEXT),
             error: None,
-            summary: SharedString::default(),
         };
         bar.add_text_row(window, cx);
         bar
@@ -69,14 +66,6 @@ impl FilterBar {
         .detach();
     }
 
-    pub fn set_summary(&mut self, summary: String, cx: &mut Context<Self>) {
-        let summary: SharedString = summary.into();
-        if self.summary != summary {
-            self.summary = summary;
-            cx.notify();
-        }
-    }
-
     fn add_text_row(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let input = Self::input("text, * ? wildcards, or regex", window, cx);
         self.texts.push(TextRow { input, case_sensitive: false, regex: false, exclude: false });
@@ -93,15 +82,10 @@ impl FilterBar {
             let pattern = if row.regex { TextPattern::Regex(text.to_string()) } else { TextPattern::Wildcard(text.to_string()) };
             conditions.push(Condition::Text(TextCondition { pattern, case_sensitive: row.case_sensitive, exclude: row.exclude }));
         }
-        let context_text = self.context.read(cx).value();
-        let context = match context_text.trim() {
-            "" => 0,
-            text => text.parse::<usize>().map_err(|_| format!("Context must be a number from 0 to {MAX_CONTEXT}"))?,
-        };
         Ok(Filter {
             levels: self.levels.clone(),
             conditions,
-            context: context.min(MAX_CONTEXT),
+            context: self.context,
         })
     }
 
@@ -125,7 +109,6 @@ impl FilterBar {
     fn clear(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.levels = LevelFilter::default();
         self.levels_before = None;
-        self.context.update(cx, |i, cx| i.set_value("0", window, cx));
         self.texts.clear();
         self.add_text_row(window, cx);
         self.error = None;
@@ -298,16 +281,12 @@ impl Render for FilterBar {
                 h_flex()
                     .gap_2()
                     .items_center()
-                    .child(div().text_color(muted).child("Context"))
-                    .child(Self::sized(&self.context, 48.))
-                    .child(div().text_color(muted).child("entries around each match"))
                     .child(Button::new("apply").xsmall().primary().label("Apply ⏎").tooltip("Apply the Filter (Enter)").on_click(
                         cx.listener(|this, _, _, cx| this.apply(cx)),
                     ))
                     .child(Button::new("clear").xsmall().outline().label("Clear all").tooltip("Remove every condition").on_click(
                         cx.listener(|this, _, window, cx| this.clear(window, cx)),
                     ))
-                    .child(div().text_color(muted).child(self.summary.clone()))
                     .children(self.error.clone().map(|e| div().text_color(danger).child(e))),
             )
     }

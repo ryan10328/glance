@@ -77,14 +77,14 @@ Multi-file merged timeline, OS file association, saving Filter results to a file
 - Entry selection (click, Shift range, Cmd/Ctrl add) and copy of full Entries including continuation lines.
 
 ### 11. Filter and Search UI (ui)
-- Filter bar: Level checkboxes (with All and "WARN and above" presets), text conditions (wildcard or regex, case-sensitivity, exclude) and Context N. Field and time conditions were dropped by design.
+- Filter bar: Level checkboxes (with All and "WARN and above" presets), text conditions (wildcard or regex, case-sensitivity, exclude). Context N is the `filter_context` setting in `config.toml`, not a bar field. Field and time conditions were dropped by design.
 - Search bar: live search, next/previous, count, case-sensitivity and regex toggles.
 - "Show Context" for a single Entry and jump to next ERROR-or-above moved to tickets 14 and 15.
 
 ### 12. Highlighting (ui + core), in three steps
 - 12a: built-in Level rules coloring the whole Entry; mark Search occurrences in the visible first line.
 - 12b: Highlight Rules typed in the window, applied live as text color on the matching text; shared by all Tabs, remembered in `state.toml`, first rule wins.
-- 12c: settings window editing `config.toml` (font, font size, time zone); direct file edits are respected.
+- 12c: settings window editing `config.toml` (font, font size, time zone, Filter context); direct file edits are respected.
 - 12d: color theme choice (System, Light, Dark) in the Tab bar, remembered in `state.toml`; 12c's settings window offers the same choice. Highlight palette colors have light and dark variants.
 
 ### 13. Follow Tail UI (ui)
