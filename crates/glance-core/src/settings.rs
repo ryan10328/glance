@@ -76,6 +76,9 @@ pub struct HighlightRule {
 #[serde(default)]
 pub struct Config {
     pub wrap_long_lines: bool,
+    /// IANA name (e.g. `"UTC"`, `"Asia/Taipei"`) for timestamps that carry no
+    /// zone. `None` means the local zone. A per-file choice overrides it.
+    pub default_time_zone: Option<String>,
     pub highlight_rules: Vec<HighlightRule>,
 }
 

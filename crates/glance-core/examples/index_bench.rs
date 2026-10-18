@@ -34,7 +34,7 @@ fn main() -> std::io::Result<()> {
 
     let start = Instant::now();
     let reader = Arc::new(BlockReader::open(&path)?);
-    let index = EntryIndex::open(&reader)?;
+    let (_format, index) = EntryIndex::open(&reader, None)?;
     let handle = IndexHandle::spawn(reader, index);
     let shared = handle.index().clone();
     let first_page = loop {

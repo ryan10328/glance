@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread::JoinHandle;
 
+use crate::format::Format;
 use crate::reader::{BlockReader, SCAN_CHUNK_SIZE};
 use crate::timestamp::{PREFIX_LEN, TimestampStyle};
 
@@ -85,15 +86,17 @@ impl EntryIndex {
         }
     }
 
-    /// Opens a file: rejects binary data, then detects the rule from the sample.
-    pub fn open(reader: &BlockReader) -> io::Result<Self> {
+    /// Opens a file: rejects binary data, then detects its Format (unless the
+    /// user chose one) and the matching Entry rule from the start of the file.
+    pub fn open(reader: &BlockReader, format: Option<Format>) -> io::Result<(Format, Self)> {
         let mut sample = vec![0u8; SAMPLE_LEN];
         let n = reader.read_uncached(0, &mut sample)?;
         sample.truncate(n);
         if looks_binary(&sample) {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "file looks binary, not a log"));
         }
-        Ok(Self::new(EntryRule::detect(&sample)))
+        let format = format.unwrap_or_else(|| Format::detect(&sample, n == SAMPLE_LEN));
+        Ok((format, Self::new(format.entry_rule(&sample))))
     }
 
     pub fn rule(&self) -> EntryRule {
@@ -273,7 +276,7 @@ mod tests {
         let reader = BlockReader::open(file.path()).unwrap();
         let mut index = match rule {
             Some(rule) => EntryIndex::new(rule),
-            None => EntryIndex::open(&reader).unwrap(),
+            None => EntryIndex::open(&reader, None).unwrap().1,
         };
         index.advance(&reader, u64::MAX).unwrap();
         index.commit_tail();
@@ -357,7 +360,7 @@ mod tests {
     fn incremental_steps_match_a_single_pass() {
         let data = TRACE.repeat(500);
         let (whole, _f, reader) = build(data.as_bytes(), None);
-        let mut stepped = EntryIndex::open(&reader).unwrap();
+        let mut stepped = EntryIndex::open(&reader, None).unwrap().1;
         while !stepped.advance(&reader, 777).unwrap().is_complete() {}
         stepped.commit_tail();
         assert_eq!(stepped.starts, whole.starts);
@@ -378,8 +381,21 @@ mod tests {
         file.write_all(b"\x7fELF\0\0\0binary").unwrap();
         file.flush().unwrap();
         let reader = BlockReader::open(file.path()).unwrap();
-        let err = EntryIndex::open(&reader).unwrap_err();
+        let err = EntryIndex::open(&reader, None).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn format_can_be_overridden_by_the_user() {
+        let data = "{\"a\":1}\n{\"a\":2}\n";
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(data.as_bytes()).unwrap();
+        file.flush().unwrap();
+        let reader = BlockReader::open(file.path()).unwrap();
+        assert_eq!(EntryIndex::open(&reader, None).unwrap().0, Format::JsonLines);
+        let (format, index) = EntryIndex::open(&reader, Some(Format::PlainText)).unwrap();
+        assert_eq!(format, Format::PlainText);
+        assert_eq!(index.rule(), EntryRule::PerLine);
     }
 
     #[test]
@@ -406,7 +422,7 @@ mod tests {
         file.write_all(data.as_bytes()).unwrap();
         file.flush().unwrap();
         let reader = Arc::new(BlockReader::open(file.path()).unwrap());
-        let index = EntryIndex::open(&reader).unwrap();
+        let index = EntryIndex::open(&reader, None).unwrap().1;
         let handle = IndexHandle::spawn(reader, index);
         let shared = handle.index().clone();
         handle.join().unwrap();

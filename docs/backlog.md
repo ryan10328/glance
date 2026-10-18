@@ -12,7 +12,7 @@ Multi-file merged timeline, OS file association, saving Filter results to a file
 - [x] 2. Level normalization
 - [x] 3. Block reader
 - [x] 4. Incremental Entry index
-- [ ] 5. Format Detection and parsers
+- [x] 5. Format Detection and parsers
 - [ ] 6. Filter engine
 - [ ] 7. Search engine
 - [ ] 8. Rotation detection and Follow Tail data path
