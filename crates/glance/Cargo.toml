@@ -1,0 +1,8 @@
+[package]
+name = "glance"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+glance-core = { path = "../glance-core" }
+gpui-kit = "0.7.3"
