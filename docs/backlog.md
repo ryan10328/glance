@@ -20,7 +20,7 @@ Multi-file merged timeline, OS file association, saving Filter results to a file
 - [x] 10. Virtualized Entry view
 - [x] 11. Filter and Search UI
 - [ ] 12a. Level coloring and Search occurrence highlighting
-- [ ] 12b. User Highlight Rules from `config.toml`
+- [x] 12b. Highlight Rules in the window (text color, remembered)
 - [ ] 12c. Settings window
 - [ ] 13. Follow Tail UI
 - [ ] 14. Detail panel
@@ -31,7 +31,7 @@ Multi-file merged timeline, OS file association, saving Filter results to a file
 
 ### 1. Settings paths and files (core)
 - Resolve the config directory with `directories::ProjectDirs::from("com", "ryan", "Glance")`; debug builds append `-dev`.
-- Load `config.toml` (user-edited: Highlight Rules, preferences) and `state.toml` (program-written: window size, recent files) via `serde`; missing files fall back to defaults.
+- Load `config.toml` (user-edited preferences) and `state.toml` (program-written: window size, recent files, Highlight Rules) via `serde`; missing files fall back to defaults.
 - Tests: path resolution, defaults, malformed TOML does not crash.
 
 ### 2. Level normalization (core)
@@ -82,8 +82,8 @@ Multi-file merged timeline, OS file association, saving Filter results to a file
 
 ### 12. Highlighting (ui + core), in three steps
 - 12a: built-in Level rules coloring the whole Entry; mark Search occurrences in the visible first line.
-- 12b: user rules from `config.toml` with scope (whole Entry or matching text) and ordering.
-- 12c: settings window editing `config.toml` (rules, font, time zone); direct file edits are respected.
+- 12b: Highlight Rules typed in the window, applied live as text color on the matching text; shared by all Tabs, remembered in `state.toml`, first rule wins.
+- 12c: settings window editing `config.toml` (font, font size, time zone); direct file edits are respected.
 
 ### 13. Follow Tail UI (ui)
 - Toggle, auto-pause when scrolling up, resume at the bottom or by button.

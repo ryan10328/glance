@@ -1,6 +1,7 @@
 //! One open Log File: its Filter, selection, scrolling and Entry view.
 
 use std::cell::Cell;
+use std::ops::Range;
 use std::path::Path;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -8,6 +9,7 @@ use std::time::{Duration, Instant};
 use glance_core::entry;
 use glance_core::filter::{CompiledFilter, FilterContext, FilteredView, ViewRow, };
 use glance_core::format::{parse_entry, resolve_time_zone};
+use glance_core::highlight::{Highlighter, Rgb};
 use glance_core::search::{AllEntries, Direction, Rows, Search, SearchQuery};
 use glance_core::selection::Selection;
 use glance_core::session::{LogFile, Polled};
@@ -21,6 +23,7 @@ use gpui_kit::*;
 use jiff::tz::TimeZone;
 
 use crate::filter_bar::{FilterBar, FilterBarEvent};
+use crate::highlight_bar::HighlightBar;
 use crate::level_style::{LevelPalette, LevelStyle};
 use crate::search_bar::{SearchBar, SearchBarEvent};
 
@@ -45,6 +48,9 @@ const DEFAULT_FONT: &str = "monospace";
 pub struct TabView {
     file: LogFile,
     config: Rc<Config>,
+    highlighter: Rc<Highlighter>,
+    /// Shared by every Tab; shown here so it sits with the Filter and Search bars.
+    highlight_bar: Entity<HighlightBar>,
     ctx: FilterContext,
     selection: Selection,
     /// Horizontal scroll offset of the Entry text, in pixels.
@@ -75,8 +81,40 @@ pub struct TabView {
     search_autojump: bool,
 }
 
+pub fn color_of([r, g, b]: Rgb) -> Hsla {
+    rgb(u32::from(r) << 16 | u32::from(g) << 8 | u32::from(b)).into()
+}
+
+/// Combines Search matches (background) with Highlight Rule matches (text color)
+/// into non-overlapping runs; where both cover the same text both apply.
+fn merge_highlights(
+    text: &str,
+    search: Vec<Range<usize>>,
+    rules: Vec<(Range<usize>, Rgb)>,
+    search_bg: Hsla,
+) -> Vec<(Range<usize>, HighlightStyle)> {
+    let on_boundary = |r: &Range<usize>| text.is_char_boundary(r.start) && text.is_char_boundary(r.end);
+    let search: Vec<_> = search.into_iter().filter(on_boundary).collect();
+    let rules: Vec<_> = rules.into_iter().filter(|(r, _)| on_boundary(r)).collect();
+    let mut cuts: Vec<usize> =
+        search.iter().map(|r| [r.start, r.end]).chain(rules.iter().map(|(r, _)| [r.start, r.end])).flatten().collect();
+    cuts.sort_unstable();
+    cuts.dedup();
+    let covers = |r: &Range<usize>, a: usize, b: usize| r.start <= a && b <= r.end;
+    cuts.windows(2)
+        .filter_map(|w| {
+            let (a, b) = (w[0], w[1]);
+            let background = search.iter().any(|r| covers(r, a, b));
+            let color = rules.iter().find(|(r, _)| covers(r, a, b)).map(|(_, c)| color_of(*c));
+            (background || color.is_some()).then(|| {
+                (a..b, HighlightStyle { background_color: background.then_some(search_bg), color, ..Default::default() })
+            })
+        })
+        .collect()
+}
+
 impl TabView {
-    pub fn new(file: LogFile, config: Rc<Config>, window: &mut Window, cx: &mut App) -> Entity<Self> {
+    pub fn new(file: LogFile, config: Rc<Config>, highlighter: Rc<Highlighter>, highlight_bar: Entity<HighlightBar>, window: &mut Window, cx: &mut App) -> Entity<Self> {
         cx.new(|cx| {
             let zone = resolve_time_zone(None, config.default_time_zone.as_deref()).unwrap_or(TimeZone::UTC);
             let rule = file.index().read().unwrap().rule();
@@ -106,6 +144,9 @@ impl TabView {
             })
             .detach();
             Self {
+                message: None,
+                highlighter,
+                highlight_bar,
                 generation: file.generation(),
                 file,
                 config,
@@ -119,7 +160,6 @@ impl TabView {
                 filter: None,
                 pending_scroll: None,
                 selection_settled: true,
-                message: None,
                 search_bar,
                 search_open: false,
                 search_query: None,
@@ -129,6 +169,12 @@ impl TabView {
                 search_autojump: false,
             }
         })
+    }
+
+    /// The Highlight Rules changed in the window.
+    pub fn set_highlighter(&mut self, highlighter: Rc<Highlighter>, cx: &mut Context<Self>) {
+        self.highlighter = highlighter;
+        cx.notify();
     }
 
     pub fn title(&self) -> String {
@@ -503,6 +549,7 @@ impl TabView {
         let font_size = self.font_size();
         let row_height = (font_size * 1.5).ceil();
         let palette = LevelPalette::new(cx);
+        let highlighter = self.highlighter.clone();
         let (muted, selected_bg, hover_bg, current_bg, found_bg) = {
             let theme = cx.theme();
             (theme.muted_foreground, theme.list_active, theme.list_hover, theme.accent, theme.warning)
@@ -525,16 +572,9 @@ impl TabView {
                         max_chars.set(max_chars.get().max(text.chars().count() + 12));
                         let level = parse_entry(this.ctx.format, this.ctx.rule, text.as_bytes(), &this.ctx.zone).level;
                         let LevelStyle { tint, faded } = palette.style(level);
-                        // Search occurrences in the visible first line.
-                        let found: Vec<_> = this
-                            .search
-                            .as_ref()
-                            .map(|s| s.occurrences(text.as_bytes()))
-                            .unwrap_or_default()
-                            .into_iter()
-                            .filter(|r| text.is_char_boundary(r.start) && text.is_char_boundary(r.end))
-                            .map(|r| (r, HighlightStyle { background_color: Some(found_bg.opacity(0.55)), ..Default::default() }))
-                            .collect();
+                        // Search matches get a background; the user's Highlight Rules color the text.
+                        let search_ranges = this.search.as_ref().map(|s| s.occurrences(text.as_bytes())).unwrap_or_default();
+                        let found = merge_highlights(&text, search_ranges, highlighter.text_spans(text.as_bytes()), found_bg.opacity(0.55));
                         let badge = (extra > 0).then(|| format!("  [+{extra}{} lines]", if more { "+" } else { "" }));
                         Some(
                             h_flex()
@@ -624,7 +664,8 @@ impl Render for TabView {
                     .border_b_1()
                     .border_color(border)
                     .child(self.filter_bar.clone())
-                    .children(self.search_open.then(|| self.search_bar.clone())),
+                    .children(self.search_open.then(|| self.search_bar.clone()))
+                    .child(self.highlight_bar.clone()),
             )
             .child(self.render_entry_view(cx))
     }

@@ -5,6 +5,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use glance_core::format::Format;
+use glance_core::highlight::Highlighter;
 use glance_core::session::{LogFile, Polled};
 use glance_core::settings::{self, Config, State, WindowSize};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -13,6 +14,7 @@ use gpui_kit::component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use crate::highlight_bar::{HighlightBar, HighlightBarEvent};
 use crate::tab_view::TabView;
 
 const POLL_TICK: Duration = Duration::from_millis(500);
@@ -24,6 +26,8 @@ pub struct GlanceApp {
     tabs: Vec<Entity<TabView>>,
     active: usize,
     config: Rc<Config>,
+    highlight_bar: Entity<HighlightBar>,
+    highlighter: Rc<Highlighter>,
     state: State,
     state_dirty: bool,
     message: Option<String>,
@@ -47,7 +51,30 @@ impl GlanceApp {
             Some(Err(e)) => (Config::default(), Some(format!("config.toml ignored: {e}"))),
             None => (Config::default(), None),
         };
-        let mut app = Self { tabs: Vec::new(), active: 0, config: Rc::new(config), state, state_dirty: false, message, tick: 0 };
+        let highlight_bar = cx.new(|cx| HighlightBar::new(&state.highlight_rules, window, cx));
+        cx.subscribe(&highlight_bar, |this, _, event: &HighlightBarEvent, cx| {
+            let HighlightBarEvent::Changed { rules, highlighter } = event;
+            this.state.highlight_rules = rules.clone();
+            this.state_dirty = true;
+            this.highlighter = highlighter.clone();
+            for tab in &this.tabs {
+                tab.update(cx, |tab, cx| tab.set_highlighter(highlighter.clone(), cx));
+            }
+            cx.notify();
+        })
+        .detach();
+        let highlighter = Rc::new(Highlighter::new(&state.highlight_rules).0);
+        let mut app = Self {
+            tabs: Vec::new(),
+            active: 0,
+            config: Rc::new(config),
+            highlight_bar,
+            highlighter,
+            state,
+            state_dirty: false,
+            message,
+            tick: 0,
+        };
         for path in args {
             app.open(&path, None, window, cx);
         }
@@ -78,7 +105,7 @@ impl GlanceApp {
         }
         match LogFile::open(&path, format) {
             Ok(file) => {
-                self.tabs.push(TabView::new(file, self.config.clone(), window, cx));
+                self.tabs.push(TabView::new(file, self.config.clone(), self.highlighter.clone(), self.highlight_bar.clone(), window, cx));
                 self.active = self.tabs.len() - 1;
                 self.message = None;
                 self.remember_recent(path);
@@ -157,7 +184,7 @@ impl GlanceApp {
             Format::JsonLines => Format::PlainText,
         };
         match LogFile::open(&path, Some(next)) {
-            Ok(file) => self.tabs[self.active] = TabView::new(file, self.config.clone(), window, cx),
+            Ok(file) => self.tabs[self.active] = TabView::new(file, self.config.clone(), self.highlighter.clone(), self.highlight_bar.clone(), window, cx),
             Err(e) => self.message = Some(e.to_string()),
         }
     }

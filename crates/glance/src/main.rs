@@ -1,5 +1,6 @@
 mod app;
 mod filter_bar;
+mod highlight_bar;
 mod level_style;
 mod search_bar;
 mod tab_view;

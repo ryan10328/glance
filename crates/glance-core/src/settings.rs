@@ -52,23 +52,17 @@ impl fmt::Display for SettingsError {
 
 impl std::error::Error for SettingsError {}
 
-/// Where a Highlight Rule applies.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum HighlightScope {
-    #[default]
-    Entry,
-    Text,
-}
-
+/// A piece of text to color wherever it appears, as typed in the window.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HighlightRule {
+    /// Wildcard text (`*`, `?`), or a regular expression when `regex` is set.
     pub pattern: String,
     #[serde(default)]
     pub regex: bool,
-    pub color: String,
     #[serde(default)]
-    pub scope: HighlightScope,
+    pub case_sensitive: bool,
+    /// Index into [`crate::highlight::PALETTE`].
+    pub color: usize,
 }
 
 /// User-edited preferences.
@@ -84,7 +78,6 @@ pub struct Config {
     /// IANA name (e.g. `"UTC"`, `"Asia/Taipei"`) for timestamps that carry no
     /// zone. `None` means the local zone. A per-file choice overrides it.
     pub default_time_zone: Option<String>,
-    pub highlight_rules: Vec<HighlightRule>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -99,6 +92,8 @@ pub struct WindowSize {
 pub struct State {
     pub window: Option<WindowSize>,
     pub recent_files: Vec<PathBuf>,
+    /// The Highlight Rules shown in the window, shared by every Tab.
+    pub highlight_rules: Vec<HighlightRule>,
 }
 
 /// Loads a settings file. A missing file yields the defaults; a malformed one
@@ -153,24 +148,29 @@ mod tests {
         fs::write(&path, "wrap_long_lines = true\n").unwrap();
         let config: Config = load(&path).unwrap();
         assert!(config.wrap_long_lines);
-        assert!(config.highlight_rules.is_empty());
     }
 
     #[test]
-    fn highlight_rules_parse_with_defaults() {
+    fn highlight_rules_round_trip_through_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(STATE_FILE);
+        let state = State {
+            highlight_rules: vec![
+                HighlightRule { pattern: "timeout".into(), regex: false, case_sensitive: false, color: 2 },
+                HighlightRule { pattern: r"req-\d+".into(), regex: true, case_sensitive: true, color: 5 },
+            ],
+            ..State::default()
+        };
+        save(&path, &state).unwrap();
+        assert_eq!(load::<State>(&path).unwrap(), state);
+    }
+
+    #[test]
+    fn old_config_files_with_highlight_rules_still_load() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(CONFIG_FILE);
-        fs::write(
-            &path,
-            "# my rules\n[[highlight_rules]]\npattern = \"timeout\"\ncolor = \"#ffcc00\"\n\n\
-             [[highlight_rules]]\npattern = \"req-\\\\d+\"\nregex = true\ncolor = \"#00ccff\"\nscope = \"text\"\n",
-        )
-        .unwrap();
-        let config: Config = load(&path).unwrap();
-        assert_eq!(config.highlight_rules.len(), 2);
-        assert!(!config.highlight_rules[0].regex);
-        assert_eq!(config.highlight_rules[0].scope, HighlightScope::Entry);
-        assert_eq!(config.highlight_rules[1].scope, HighlightScope::Text);
+        fs::write(&path, "wrap_long_lines = true\n[[highlight_rules]]\npattern = \"x\"\ncolor = \"#fff\"\n").unwrap();
+        assert!(load::<Config>(&path).unwrap().wrap_long_lines);
     }
 
     #[test]
@@ -190,6 +190,7 @@ mod tests {
         let state = State {
             window: Some(WindowSize { width: 1280, height: 800 }),
             recent_files: vec![PathBuf::from("/var/log/app.log")],
+            ..State::default()
         };
         save(&path, &state).unwrap();
         assert_eq!(load::<State>(&path).unwrap(), state);

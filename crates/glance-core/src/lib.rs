@@ -1,6 +1,7 @@
 pub mod entry;
 pub mod filter;
 pub mod format;
+pub mod highlight;
 pub mod index;
 pub mod level;
 pub mod reader;

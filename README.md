@@ -9,7 +9,7 @@ A fast desktop log viewer built with Rust and [GPUI](https://www.gpui.rs/) via [
 - Open local log files of several gigabytes without loading them into memory.
 - Work with plain-text and JSON-lines logs, detecting the format automatically.
 - Search and filter by level and text (wildcard or regex).
-- Highlight entries with built-in and user-defined rules.
+- Highlight entries by Level and color any text you choose.
 - Follow a file as it grows, like `tail -f`.
 - Run on macOS, Linux and Windows.
 
@@ -27,6 +27,10 @@ The workspace has two crates:
 
 - `crates/glance-core`: file reading, indexing, format parsing, filtering and search. No GPUI dependency.
 - `crates/glance`: the GPUI application.
+
+## Highlight rules
+
+Besides the built-in Level colors, the **Highlight** row under the Filter and Search bars colors any text you choose, as you type. Pick a color for each rule; `*` and `?` are wildcards unless `.* Regex` is on. Only the matching text changes color, so Level colors stay readable. Rules are shared by every tab and remembered in `state.toml`; where two rules overlap, the upper one wins. Search matches get a background on top.
 
 ## License
 

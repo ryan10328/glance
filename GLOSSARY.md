@@ -49,8 +49,8 @@ Coloring of content so it stands out, applied according to Highlight Rules. It d
 _Avoid_: Mark, color rule
 
 **Highlight Rule**:
-A user-visible condition (a Level, a keyword or a pattern) paired with a color and a scope, either the whole Entry or only the matching text. Earlier rules in the list take precedence over later ones.
-_Avoid_: Color rule, theme
+A piece of text (plain with `*` `?` wildcards, or a regular expression) paired with a text color, typed in the window and applied as you type. Only the matching text is colored, never the whole Entry or its background, so it stays distinct from Level colors. Rules are shared by every Tab and remembered between sessions; earlier rules in the list take precedence over later ones.
+_Avoid_: Color rule, theme, config rule
 
 **Bookmark**:
 A manual marker on a single Entry, used to remember a position and jump back to it.
