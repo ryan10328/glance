@@ -1,3 +1,4 @@
+pub mod filter;
 pub mod format;
 pub mod index;
 pub mod level;

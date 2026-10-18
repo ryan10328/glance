@@ -2017,6 +2017,7 @@ dependencies = [
  "directories",
  "jiff",
  "memchr",
+ "regex",
  "serde",
  "serde_json",
  "tempfile",

@@ -6,6 +6,7 @@ use std::io::{BufWriter, Write};
 use std::sync::Arc;
 use std::time::Instant;
 
+use glance_core::filter::{CompiledFilter, Condition, Filter, FilterContext, FilteredView, TextCondition, TextPattern};
 use glance_core::index::{EntryIndex, IndexHandle};
 use glance_core::reader::BlockReader;
 
@@ -34,8 +35,9 @@ fn main() -> std::io::Result<()> {
 
     let start = Instant::now();
     let reader = Arc::new(BlockReader::open(&path)?);
-    let (_format, index) = EntryIndex::open(&reader, None)?;
-    let handle = IndexHandle::spawn(reader, index);
+    let (format, index) = EntryIndex::open(&reader, None)?;
+    let rule = index.rule();
+    let handle = IndexHandle::spawn(reader.clone(), index);
     let shared = handle.index().clone();
     let first_page = loop {
         if shared.read().unwrap().len() >= 50 {
@@ -48,6 +50,21 @@ fn main() -> std::io::Result<()> {
     let index = shared.read().unwrap();
     println!("first 50 entries after {first_page:?}");
     println!("indexed {} entries in {total:?} ({:.0} MiB/s)", index.len(), written as f64 / 1048576.0 / total.as_secs_f64());
+
+    let filter = Filter {
+        conditions: vec![Condition::Text(TextCondition {
+            pattern: TextPattern::Literal("ERROR".into()),
+            case_sensitive: true,
+            exclude: false,
+        })],
+        ..Filter::default()
+    };
+    let compiled = CompiledFilter::new(&filter).unwrap();
+    let ctx = FilterContext { format, rule, zone: jiff::tz::TimeZone::UTC };
+    let mut view = FilteredView::new();
+    let start = Instant::now();
+    while view.update(&compiled, &index, &reader, &ctx, 100_000)? > 0 {}
+    println!("filter text \"ERROR\": {} matches in {:?}", view.match_count(), start.elapsed());
     std::fs::remove_file(&path)?;
     Ok(())
 }
