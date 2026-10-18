@@ -1,9 +1,13 @@
 //! Window shell: Tab bar, status bar and the open-file flows.
 
+use std::cell::Cell;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::time::Duration;
 
+use glance_core::entry;
 use glance_core::format::Format;
+use glance_core::selection::Selection;
 use glance_core::session::{LogFile, Polled};
 use glance_core::settings::{self, Config, State, WindowSize};
 use glance_core::watch::Rotation;
@@ -13,16 +17,38 @@ use gpui_kit::component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+actions!(glance, [CopySelection]);
+
 const POLL_TICK: Duration = Duration::from_millis(500);
 /// Background Tabs are polled every this many ticks (about 2 s).
 const BACKGROUND_EVERY: u64 = 4;
 const MAX_RECENT: usize = 20;
+const DEFAULT_FONT_SIZE: f32 = 13.0;
+const GUTTER_WIDTH: f32 = 72.0;
+/// Largest selection that can be copied at once.
+const COPY_LIMIT: usize = 64 * 1024 * 1024;
+
+#[cfg(target_os = "macos")]
+const DEFAULT_FONT: &str = "Menlo";
+#[cfg(target_os = "windows")]
+const DEFAULT_FONT: &str = "Consolas";
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+const DEFAULT_FONT: &str = "monospace";
 
 struct OpenTab {
     file: LogFile,
+    selection: Selection,
+    /// Horizontal scroll offset of the Entry text, in pixels.
+    scroll_x: f32,
+    /// Longest first line seen so far, in characters; bounds `scroll_x`.
+    max_chars: Rc<Cell<usize>>,
 }
 
 impl OpenTab {
+    fn new(file: LogFile) -> Self {
+        Self { file, selection: Selection::default(), scroll_x: 0.0, max_chars: Rc::new(Cell::new(0)) }
+    }
+
     fn title(&self) -> String {
         self.file
             .path()
@@ -40,6 +66,7 @@ pub struct GlanceApp {
     state_dirty: bool,
     message: Option<String>,
     tick: u64,
+    focus: FocusHandle,
 }
 
 fn settings_path(name: &str) -> Option<PathBuf> {
@@ -59,7 +86,7 @@ impl GlanceApp {
             Some(Err(e)) => (Config::default(), Some(format!("config.toml ignored: {e}"))),
             None => (Config::default(), None),
         };
-        let mut app = Self { tabs: Vec::new(), active: 0, config, state, state_dirty: false, message, tick: 0 };
+        let mut app = Self { tabs: Vec::new(), active: 0, config, state, state_dirty: false, message, tick: 0, focus: cx.focus_handle() };
         for path in args {
             app.open(&path, None);
         }
@@ -90,7 +117,7 @@ impl GlanceApp {
         }
         match LogFile::open(&path, format) {
             Ok(file) => {
-                self.tabs.push(OpenTab { file });
+                self.tabs.push(OpenTab::new(file));
                 self.active = self.tabs.len() - 1;
                 self.message = None;
                 self.remember_recent(path);
@@ -165,7 +192,7 @@ impl GlanceApp {
             Format::JsonLines => Format::PlainText,
         };
         match LogFile::open(tab.file.path(), Some(next)) {
-            Ok(file) => tab.file = file,
+            Ok(file) => *tab = OpenTab::new(file),
             Err(e) => self.message = Some(e.to_string()),
         }
     }
@@ -259,12 +286,133 @@ impl GlanceApp {
                     .child("Filter: (coming in a later step)")
                     .child("Search: (coming in a later step)"),
             )
-            .child(
-                div()
-                    .flex_1()
-                    .p_3()
-                    .child(format!("{entries} entries (Entry view comes in a later step)")),
-            )
+            .child(self.render_entry_view(entries, cx))
+    }
+
+    fn row_height(&self) -> f32 {
+        (self.font_size() * 1.5).ceil()
+    }
+
+    fn font_size(&self) -> f32 {
+        self.config.font_size.filter(|s| *s >= 6.0).unwrap_or(DEFAULT_FONT_SIZE)
+    }
+
+    fn render_entry_view(&self, count: usize, cx: &mut Context<Self>) -> impl IntoElement {
+        let tab = &self.tabs[self.active];
+        let index = tab.file.index().clone();
+        let reader = tab.file.reader().clone();
+        let selection = tab.selection.clone();
+        let scroll_x = tab.scroll_x;
+        let max_chars = tab.max_chars.clone();
+        let family: SharedString = self.config.font_family.clone().unwrap_or_else(|| DEFAULT_FONT.to_owned()).into();
+        let font_size = self.font_size();
+        let row_height = self.row_height();
+        let (muted, selected_bg, hover_bg) = {
+            let theme = cx.theme();
+            (theme.muted_foreground, theme.list_active, theme.list_hover)
+        };
+        let list = uniform_list(
+            "entries",
+            count,
+            cx.processor(move |_this, range: std::ops::Range<usize>, _window, cx| {
+                let index = index.read().unwrap();
+                range
+                    .map(|row| {
+                        // Until Filter is wired in, a row is an Entry.
+                        let summary = entry::read_summary(&index, &reader, row).ok().flatten();
+                        let (text, extra, more) = summary
+                            .map_or((String::new(), 0, false), |s| (s.first_line, s.extra_lines, s.more));
+                        max_chars.set(max_chars.get().max(text.chars().count() + 12));
+                        let badge = (extra > 0).then(|| format!("  [+{extra}{} lines]", if more { "+" } else { "" }));
+                        h_flex()
+                            .id(("row", row))
+                            .h(px(row_height))
+                            .w_full()
+                            .flex_none()
+                            .when(selection.contains(row), |s| s.bg(selected_bg))
+                            .hover(|s| s.bg(hover_bg))
+                            .child(
+                                div()
+                                    .w(px(GUTTER_WIDTH))
+                                    .flex_none()
+                                    .pr_3()
+                                    .text_right()
+                                    .text_color(muted)
+                                    .child((row + 1).to_string()),
+                            )
+                            .child(
+                                div().flex_1().h_full().overflow_hidden().child(
+                                    div()
+                                        .relative()
+                                        .left(px(-scroll_x))
+                                        .whitespace_nowrap()
+                                        .child(text)
+                                        .children(badge.map(|b| div().text_color(muted).child(b))),
+                                ),
+                            )
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                                    window.focus(&this.focus, cx);
+                                    this.select_row(row, event.modifiers);
+                                    cx.notify();
+                                }),
+                            )
+                    })
+                    .collect::<Vec<_>>()
+            }),
+        )
+        .size_full();
+        div()
+            .id("entry-view")
+            .flex_1()
+            .min_h_0()
+            .font_family(family)
+            .text_size(px(font_size))
+            .key_context("EntryView")
+            .track_focus(&self.focus)
+            .on_action(cx.listener(|this, _: &CopySelection, _, cx| this.copy_selection(cx)))
+            .on_scroll_wheel(cx.listener(move |this, event: &ScrollWheelEvent, _, cx| {
+                let delta = event.delta.pixel_delta(px(row_height));
+                let dx = f32::from(delta.x);
+                if dx != 0.0 {
+                    this.scroll_horizontally(dx, font_size);
+                    cx.notify();
+                }
+            }))
+            .child(list)
+    }
+
+    fn select_row(&mut self, row: usize, modifiers: Modifiers) {
+        let Some(tab) = self.tabs.get_mut(self.active) else { return };
+        if modifiers.shift {
+            tab.selection.extend_to(row);
+        } else if modifiers.secondary() {
+            tab.selection.toggle(row);
+        } else {
+            tab.selection.click(row);
+        }
+    }
+
+    fn scroll_horizontally(&mut self, dx: f32, font_size: f32) {
+        let Some(tab) = self.tabs.get_mut(self.active) else { return };
+        // Monospace glyphs are about 0.6 em wide.
+        let content = tab.max_chars.get() as f32 * font_size * 0.6;
+        tab.scroll_x = (tab.scroll_x - dx).clamp(0.0, (content - 200.0).max(0.0));
+    }
+
+    fn copy_selection(&mut self, cx: &mut Context<Self>) {
+        let Some(tab) = self.tabs.get(self.active) else { return };
+        if tab.selection.is_empty() {
+            return;
+        }
+        let index = tab.file.index().read().unwrap();
+        // Until Filter is wired in, a row is an Entry.
+        match entry::copy_entries(&index, tab.file.reader(), tab.selection.rows(), COPY_LIMIT) {
+            Ok(text) => cx.write_to_clipboard(ClipboardItem::new_string(text)),
+            Err(e) => self.message = Some(e.to_string()),
+        }
+        cx.notify();
     }
 
     fn render_status_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {

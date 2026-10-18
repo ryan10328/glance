@@ -1,9 +1,11 @@
+pub mod entry;
 pub mod filter;
 pub mod format;
 pub mod index;
 pub mod level;
 pub mod reader;
 pub mod search;
+pub mod selection;
 pub mod session;
 pub mod settings;
 pub mod timestamp;

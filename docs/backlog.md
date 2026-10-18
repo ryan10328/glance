@@ -17,7 +17,7 @@ Multi-file merged timeline, OS file association, saving Filter results to a file
 - [x] 7. Search engine
 - [x] 8. Rotation detection and Follow Tail data path
 - [x] 9. Window shell and Tabs
-- [ ] 10. Virtualized Entry view
+- [x] 10. Virtualized Entry view
 - [ ] 11. Filter and Search UI
 - [ ] 12. Highlighting
 - [ ] 13. Follow Tail UI

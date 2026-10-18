@@ -72,10 +72,15 @@ pub struct HighlightRule {
 }
 
 /// User-edited preferences.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct Config {
+    /// Wrap long lines in the detail panel (the Entry view never wraps).
     pub wrap_long_lines: bool,
+    /// Monospace font of the Entry view; `None` picks the platform default.
+    pub font_family: Option<String>,
+    /// Font size in pixels of the Entry view; `None` means 13.
+    pub font_size: Option<f32>,
     /// IANA name (e.g. `"UTC"`, `"Asia/Taipei"`) for timestamps that carry no
     /// zone. `None` means the local zone. A per-file choice overrides it.
     pub default_time_zone: Option<String>,
