@@ -1,7 +1,8 @@
 //! User settings (`config.toml`) and program state (`state.toml`).
 //!
-//! `config.toml` is edited by the user; `state.toml` is written by the program.
-//! They live in separate files so the program never rewrites the user's comments.
+//! `config.toml` holds preferences, written by the Settings window or by hand;
+//! `state.toml` is program state (window size, recent files, Highlight Rules,
+//! theme). Saving a file rewrites it, so comments in it are not kept.
 
 use std::fmt;
 use std::fs;
@@ -75,9 +76,6 @@ pub struct Config {
     pub font_family: Option<String>,
     /// Font size in pixels of the Entry view; `None` means 13.
     pub font_size: Option<f32>,
-    /// IANA name (e.g. `"UTC"`, `"Asia/Taipei"`) for timestamps that carry no
-    /// zone. `None` means the local zone. A per-file choice overrides it.
-    pub default_time_zone: Option<String>,
     /// Entries kept visible around each Filter match (0 to 50).
     pub filter_context: usize,
 }

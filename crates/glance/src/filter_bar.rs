@@ -100,6 +100,11 @@ impl FilterBar {
         cx.notify();
     }
 
+    /// The Filter context setting changed; it applies with the next Apply.
+    pub fn set_context(&mut self, context: usize, _cx: &mut Context<Self>) {
+        self.context = context.min(MAX_CONTEXT);
+    }
+
     /// Reports a problem found while compiling the Filter (e.g. a bad regex).
     pub fn set_error(&mut self, error: Option<String>, cx: &mut Context<Self>) {
         self.error = error;

@@ -30,7 +30,7 @@ use crate::search_bar::{SearchBar, SearchBarEvent};
 
 actions!(glance, [CopySelection, OpenSearch, CloseSearch]);
 
-const DEFAULT_FONT_SIZE: f32 = 13.0;
+pub const DEFAULT_FONT_SIZE: f32 = 13.0;
 const GUTTER_WIDTH: f32 = 72.0;
 /// Largest selection that can be copied at once.
 const COPY_LIMIT: usize = 64 * 1024 * 1024;
@@ -40,11 +40,11 @@ const FILTER_STEP: usize = 20_000;
 const WORK_BUDGET: Duration = Duration::from_millis(8);
 
 #[cfg(target_os = "macos")]
-const DEFAULT_FONT: &str = "Menlo";
+pub const DEFAULT_FONT: &str = "Menlo";
 #[cfg(target_os = "windows")]
-const DEFAULT_FONT: &str = "Consolas";
+pub const DEFAULT_FONT: &str = "Consolas";
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-const DEFAULT_FONT: &str = "monospace";
+pub const DEFAULT_FONT: &str = "monospace";
 
 /// A frozen list of Search matches shown in the panel below the Entry view.
 struct Results {
@@ -164,7 +164,7 @@ fn merge_highlights(
 impl TabView {
     pub fn new(file: LogFile, config: Rc<Config>, highlighter: Rc<Highlighter>, highlight_bar: Entity<HighlightBar>, window: &mut Window, cx: &mut App) -> Entity<Self> {
         cx.new(|cx| {
-            let zone = resolve_time_zone(None, config.default_time_zone.as_deref()).unwrap_or(TimeZone::UTC);
+            let zone = resolve_time_zone(None, None).unwrap_or(TimeZone::UTC);
             let rule = file.index().read().unwrap().rule();
             let ctx = FilterContext { format: file.format(), rule, zone };
             let filter_bar = cx.new(|cx| FilterBar::new(config.filter_context, window, cx));
@@ -226,6 +226,14 @@ impl TabView {
                 view_state: Rc::new(Cell::new((0, 0))),
             }
         })
+    }
+
+    /// The settings changed: font, size and Filter context apply at once.
+    pub fn set_config(&mut self, config: Rc<Config>, cx: &mut Context<Self>) {
+        let context = config.filter_context;
+        self.config = config;
+        self.filter_bar.update(cx, |bar, cx| bar.set_context(context, cx));
+        cx.notify();
     }
 
     /// The Highlight Rules changed in the window.

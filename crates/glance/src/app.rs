@@ -12,17 +12,20 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::progress::Progress;
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
-use gpui_kit::component::{ActiveTheme as _, Sizable as _, Theme, ThemeMode, h_flex, v_flex};
+use gpui_kit::component::{ActiveTheme as _, IconName, Sizable as _, Theme, ThemeMode, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::highlight_bar::{HighlightBar, HighlightBarEvent};
+use crate::settings_window::SettingsView;
 use crate::tab_view::{FollowState, TabView};
 
 const POLL_TICK: Duration = Duration::from_millis(500);
 /// Background Tabs are polled every this many ticks (about 2 s).
 const BACKGROUND_EVERY: u64 = 4;
 const MAX_RECENT: usize = 20;
+
+actions!(glance, [OpenSettings]);
 
 pub struct GlanceApp {
     tabs: Vec<Entity<TabView>>,
@@ -34,6 +37,8 @@ pub struct GlanceApp {
     state_dirty: bool,
     message: Option<String>,
     tick: u64,
+    main_window: AnyWindowHandle,
+    settings_window: Option<AnyWindowHandle>,
 }
 
 fn settings_path(name: &str) -> Option<PathBuf> {
@@ -87,6 +92,8 @@ impl GlanceApp {
             state_dirty: false,
             message,
             tick: 0,
+            main_window: window.window_handle(),
+            settings_window: None,
         };
         app.apply_theme(window, cx);
         for path in args {
@@ -138,11 +145,62 @@ impl GlanceApp {
         }
     }
 
-    fn set_theme(&mut self, theme: ThemeChoice, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn set_theme(&mut self, theme: ThemeChoice, window: &mut Window, cx: &mut Context<Self>) {
         self.state.theme = theme;
         self.state_dirty = true;
         self.apply_theme(window, cx);
         cx.notify();
+    }
+
+    pub fn config(&self) -> &Rc<Config> {
+        &self.config
+    }
+
+    pub fn theme_choice(&self) -> ThemeChoice {
+        self.state.theme
+    }
+
+    pub fn main_window(&self) -> AnyWindowHandle {
+        self.main_window
+    }
+
+    /// Changes the settings, saves `config.toml` and applies them to every Tab.
+    pub fn update_config(&mut self, change: impl FnOnce(&mut Config), cx: &mut Context<Self>) {
+        let mut config = (*self.config).clone();
+        change(&mut config);
+        config.filter_context = config.filter_context.min(glance_core::filter::MAX_CONTEXT);
+        if config == *self.config {
+            return;
+        }
+        if let Some(Err(e)) = settings_path(settings::CONFIG_FILE).map(|p| settings::save(&p, &config)) {
+            self.message = Some(e.to_string());
+        }
+        self.config = Rc::new(config);
+        for tab in &self.tabs {
+            let config = self.config.clone();
+            tab.update(cx, |tab, cx| tab.set_config(config, cx));
+        }
+        cx.notify();
+    }
+
+    /// Opens the Settings window, or brings the open one to the front.
+    fn open_settings(&mut self, cx: &mut Context<Self>) {
+        if let Some(handle) = self.settings_window
+            && handle.update(cx, |_, window, _| window.activate_window()).is_ok()
+        {
+            return;
+        }
+        let app = cx.entity();
+        let (config, theme) = (self.config.clone(), self.state.theme);
+        let options = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size(px(640.), px(460.)), cx))),
+            titlebar: Some(TitlebarOptions { title: Some("Settings".into()), ..TitlebarOptions::default() }),
+            ..WindowOptions::default()
+        };
+        match gpui_kit::open_window(options, cx, move |window, cx| cx.new(|cx| SettingsView::new(app, config, theme, window, cx))) {
+            Ok((handle, _)) => self.settings_window = Some(handle),
+            Err(e) => self.message = Some(format!("Cannot open Settings: {e}")),
+        }
     }
 
     fn remember_recent(&mut self, path: PathBuf) {
@@ -380,7 +438,8 @@ impl Render for GlanceApp {
                 h_flex()
                     .gap_1()
                     .child(Button::new("add").ghost().small().label("+").on_click(cx.listener(|this, _, window, cx| this.prompt_open(window, cx))))
-                    .child(self.render_theme_menu(cx)),
+                    .child(self.render_theme_menu(cx))
+                    .child(Button::new("settings").ghost().small().icon(IconName::Settings).tooltip("Settings (Cmd/Ctrl+,)").on_click(cx.listener(|this, _, _, cx| this.open_settings(cx)))),
             );
         let body = if self.tabs.is_empty() {
             self.render_welcome(cx).into_any_element()
@@ -389,6 +448,7 @@ impl Render for GlanceApp {
         };
         v_flex()
             .size_full()
+            .on_action(cx.listener(|this, _: &OpenSettings, _, cx| this.open_settings(cx)))
             .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
                 for path in paths.paths() {
                     this.open(path, None, window, cx);

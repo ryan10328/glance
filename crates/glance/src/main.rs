@@ -3,6 +3,7 @@ mod filter_bar;
 mod highlight_bar;
 mod level_style;
 mod search_bar;
+mod settings_window;
 mod theme;
 mod tab_view;
 
@@ -10,7 +11,7 @@ use std::path::PathBuf;
 
 use gpui_kit::*;
 
-use app::GlanceApp;
+use app::{GlanceApp, OpenSettings};
 use tab_view::{CloseSearch, CopySelection, OpenSearch};
 
 fn main() {
@@ -20,10 +21,12 @@ fn main() {
         gpui_kit::init(cx);
         theme::install_softer_dark(cx);
         let copy = if cfg!(target_os = "macos") { "cmd-c" } else { "ctrl-c" };
+        let settings = if cfg!(target_os = "macos") { "cmd-," } else { "ctrl-," };
         let find = if cfg!(target_os = "macos") { "cmd-f" } else { "ctrl-f" };
         cx.bind_keys([
             KeyBinding::new(copy, CopySelection, Some("EntryView")),
             KeyBinding::new(find, OpenSearch, None),
+            KeyBinding::new(settings, OpenSettings, None),
             KeyBinding::new("escape", CloseSearch, Some("SearchBar")),
         ]);
         let state = GlanceApp::load_state();

@@ -46,7 +46,7 @@ The Search bar sits under the Highlight row (`Cmd/Ctrl+F` jumps to it; `Esc` cle
 
 Two TOML files live in the per-user settings folder (debug builds use a separate `Glance-dev` folder):
 
-- `config.toml`, edited by you: `wrap_long_lines`, `font_family`, `font_size`, `default_time_zone` and `filter_context` (entries kept around each Filter match, 0 to 50; read when a file is opened). A settings window is planned.
+- `config.toml`, your preferences: `wrap_long_lines`, `font_family`, `font_size` and `filter_context` (entries kept around each Filter match, 0 to 50; applies with the next Apply). The **Settings** window (`⚙` in the Tab bar, `Cmd/Ctrl+,`) edits the font, font size, color theme and `filter_context`, applies changes at once and saves them; saving rewrites `config.toml`, so comments in it are not kept.
 - `state.toml`, written by Glance: window size, recent files, Highlight rules and the color theme (System, Light or Dark, chosen from the Tab bar).
 
 The footer shows the entry count (`42 of 1000 entries` while a Filter is applied) and a progress bar while the file is indexed or filtered.

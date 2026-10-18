@@ -22,7 +22,7 @@ Multi-file merged timeline, OS file association, saving Filter results to a file
 - [x] 12a. Level coloring and Search occurrence highlighting
 - [x] 12b. Highlight Rules in the window (text color, remembered)
 - [x] 12d. Color theme (System, Light, Dark) from the Tab bar
-- [ ] 12c. Settings window
+- [x] 12c. Settings window
 - [x] 13. Follow Tail UI
 - [ ] 14. Detail panel
 - [ ] 15. Keyboard shortcuts
@@ -53,7 +53,7 @@ Multi-file merged timeline, OS file association, saving Filter results to a file
 ### 5. Format Detection and parsers (core)
 - Plain text and JSON lines first; detection samples the start of the file; manual override per Log File.
 - Parsed output: timestamp, Level, message, remaining fields.
-- Time zone: timestamps without a zone use the local zone, with a per-file override; displayed text is never altered.
+- Time zone: timestamps without a zone use the local zone; displayed text is never altered. No time zone setting, since Glance has no time-based features.
 
 ### 6. Filter engine (core)
 - Conditions: Level (multi-select, "WARN and above", separate "no Level" option, default on), text (wildcard or regex, case-sensitivity toggle); combined with AND.
@@ -84,7 +84,7 @@ Multi-file merged timeline, OS file association, saving Filter results to a file
 ### 12. Highlighting (ui + core), in three steps
 - 12a: built-in Level rules coloring the whole Entry; mark Search occurrences in the visible first line.
 - 12b: Highlight Rules typed in the window, applied live as text color on the matching text; shared by all Tabs, remembered in `state.toml`, first rule wins.
-- 12c: settings window editing `config.toml` (font, font size, time zone, Filter context); direct file edits are respected. `default_time_zone` is read but has no visible effect now that time conditions are gone; decide in 12c whether to keep it.
+- 12c: Settings window (`⚙` in the Tab bar, Cmd/Ctrl+,) with theme, Entry view font (installed fonts, searchable) and size with a live preview, and Filter context; changes apply at once and are saved to `config.toml` (which drops comments in that file); direct file edits are read when the app starts.
 - 12d: color theme choice (System, Light, Dark) in the Tab bar, remembered in `state.toml`; 12c's settings window offers the same choice. Highlight palette colors have light and dark variants.
 
 ### 13. Follow Tail UI (ui)
