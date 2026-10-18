@@ -6,6 +6,25 @@ Ordered by dependency and complexity, simplest first. Terms follow `GLOSSARY.md`
 
 Multi-file merged timeline, OS file association, saving Filter results to a file, multiple text encodings, custom Format rules (regex), column/table view of Entries, CI and packaging.
 
+## Progress
+
+- [x] 1. Settings paths and files
+- [ ] 2. Level normalization
+- [ ] 3. Block reader
+- [ ] 4. Incremental Entry index
+- [ ] 5. Format Detection and parsers
+- [ ] 6. Filter engine
+- [ ] 7. Search engine
+- [ ] 8. Rotation detection and Follow Tail data path
+- [ ] 9. Window shell and Tabs
+- [ ] 10. Virtualized Entry view
+- [ ] 11. Filter and Search UI
+- [ ] 12. Highlighting
+- [ ] 13. Follow Tail UI
+- [ ] 14. Detail panel
+- [ ] 15. Keyboard shortcuts
+- [ ] 16. Bookmarks (low priority)
+
 ## Tickets
 
 ### 1. Settings paths and files (core)
