@@ -10,7 +10,7 @@ Multi-file merged timeline, OS file association, saving Filter results to a file
 
 - [x] 1. Settings paths and files
 - [x] 2. Level normalization
-- [ ] 3. Block reader
+- [x] 3. Block reader
 - [ ] 4. Incremental Entry index
 - [ ] 5. Format Detection and parsers
 - [ ] 6. Filter engine
