@@ -8,7 +8,7 @@ A fast desktop log viewer built with Rust and [GPUI](https://www.gpui.rs/) via [
 
 - Open local log files of several gigabytes without loading them into memory.
 - Work with plain-text and JSON-lines logs, detecting the format automatically.
-- Search and filter by level, time range, text or regex, and structured fields.
+- Search and filter by level and text (wildcard or regex).
 - Highlight entries with built-in and user-defined rules.
 - Follow a file as it grows, like `tail -f`.
 - Run on macOS, Linux and Windows.

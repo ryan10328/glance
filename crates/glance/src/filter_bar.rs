@@ -1,19 +1,15 @@
-//! The Filter controls: Level toggles, time range, text and field conditions.
+//! The Filter controls: Level toggles and text conditions.
 
 use glance_core::filter::{
-    Condition, FieldCondition, FieldOp, Filter, LevelFilter, TextCondition, TextPattern, MAX_CONTEXT,
+    Condition, Filter, LevelFilter, TextCondition, TextPattern, MAX_CONTEXT,
 };
-use glance_core::format::parse_user_timestamp;
 use glance_core::level::Level;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use jiff::tz::TimeZone;
-
-/// Operators of a field condition, in the order the button cycles through them.
-const FIELD_OPS: [&str; 8] = ["=", "contains", "regex", ">", ">=", "<", "<=", "exists"];
 
 pub enum FilterBarEvent {
     /// The user applied a (possibly empty) Filter.
@@ -29,43 +25,25 @@ struct TextRow {
     exclude: bool,
 }
 
-struct FieldRow {
-    path: Entity<InputState>,
-    op: usize,
-    value: Entity<InputState>,
-    exclude: bool,
-}
-
 pub struct FilterBar {
     levels: LevelFilter,
-    time_from: Entity<InputState>,
-    time_to: Entity<InputState>,
-    time_available: bool,
+    /// The selection before a preset button was switched on, so that button can switch back.
+    levels_before: Option<LevelFilter>,
     texts: Vec<TextRow>,
-    fields: Vec<FieldRow>,
-    json: bool,
     context: Entity<InputState>,
-    zone: TimeZone,
     error: Option<String>,
     summary: SharedString,
 }
 
 impl FilterBar {
-    pub fn new(json: bool, time_available: bool, zone: TimeZone, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let time_from = Self::input("from, e.g. 2026-10-18 19:50:00", window, cx);
-        let time_to = Self::input("to", window, cx);
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let context = cx.new(|cx| InputState::new(window, cx).placeholder("0").default_value("0"));
         Self::apply_on_enter(&context, window, cx);
         let mut bar = Self {
             levels: LevelFilter::default(),
-            time_from,
-            time_to,
-            time_available,
+            levels_before: None,
             texts: Vec::new(),
-            fields: Vec::new(),
-            json,
             context,
-            zone,
             error: None,
             summary: SharedString::default(),
         };
@@ -98,54 +76,20 @@ impl FilterBar {
     }
 
     fn add_text_row(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let input = Self::input("text or regex", window, cx);
+        let input = Self::input("text, * ? wildcards, or regex", window, cx);
         self.texts.push(TextRow { input, case_sensitive: false, regex: false, exclude: false });
-    }
-
-    fn add_field_row(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let path = Self::input("field, e.g. req.path", window, cx);
-        let value = Self::input("value", window, cx);
-        self.fields.push(FieldRow { path, op: 0, value, exclude: false });
     }
 
     /// The Filter described by the controls, or why it is not valid.
     fn build(&self, cx: &App) -> Result<Filter, String> {
-        let time = |input: &Entity<InputState>| -> Result<Option<jiff::Timestamp>, String> {
-            let text = input.read(cx).value();
-            if text.trim().is_empty() {
-                return Ok(None);
-            }
-            parse_user_timestamp(&text, &self.zone)
-                .map(Some)
-                .ok_or_else(|| format!("Cannot read the time “{text}”. Use e.g. 2026-10-18 19:50:03"))
-        };
         let mut conditions = Vec::new();
         for row in &self.texts {
             let text = row.input.read(cx).value();
             if text.is_empty() {
                 continue;
             }
-            let pattern = if row.regex { TextPattern::Regex(text.to_string()) } else { TextPattern::Literal(text.to_string()) };
+            let pattern = if row.regex { TextPattern::Regex(text.to_string()) } else { TextPattern::Wildcard(text.to_string()) };
             conditions.push(Condition::Text(TextCondition { pattern, case_sensitive: row.case_sensitive, exclude: row.exclude }));
-        }
-        for row in &self.fields {
-            let path = row.path.read(cx).value().trim().to_owned();
-            if path.is_empty() {
-                continue;
-            }
-            let value = row.value.read(cx).value().to_string();
-            let number = || value.trim().parse::<f64>().map_err(|_| format!("“{value}” is not a number (field {path})"));
-            let op = match FIELD_OPS[row.op] {
-                "=" => FieldOp::Equals(value.clone()),
-                "contains" => FieldOp::Contains(value.clone()),
-                "regex" => FieldOp::Regex(value.clone()),
-                ">" => FieldOp::Gt(number()?),
-                ">=" => FieldOp::Ge(number()?),
-                "<" => FieldOp::Lt(number()?),
-                "<=" => FieldOp::Le(number()?),
-                _ => FieldOp::Exists,
-            };
-            conditions.push(Condition::Field(FieldCondition { path, op, exclude: row.exclude }));
         }
         let context_text = self.context.read(cx).value();
         let context = match context_text.trim() {
@@ -154,8 +98,6 @@ impl FilterBar {
         };
         Ok(Filter {
             levels: self.levels.clone(),
-            time_from: time(&self.time_from)?,
-            time_to: time(&self.time_to)?,
             conditions,
             context: context.min(MAX_CONTEXT),
         })
@@ -180,12 +122,9 @@ impl FilterBar {
 
     fn clear(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.levels = LevelFilter::default();
-        for input in [&self.time_from, &self.time_to] {
-            input.update(cx, |i, cx| i.set_value("", window, cx));
-        }
+        self.levels_before = None;
         self.context.update(cx, |i, cx| i.set_value("0", window, cx));
         self.texts.clear();
-        self.fields.clear();
         self.add_text_row(window, cx);
         self.error = None;
         cx.emit(FilterBarEvent::Apply(Filter::default()));
@@ -193,40 +132,67 @@ impl FilterBar {
     }
 
     fn level_buttons(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let mut row = h_flex().gap_1().items_center().child(div().w(px(48.)).child("Level"));
-        let toggle = |id: String, label: &'static str, on: bool, cx: &mut Context<Self>, f: fn(&mut LevelFilter, Option<Level>)| {
-            let level = Level::ALL.iter().copied().find(|l| l.as_str() == label);
-            let button = Button::new(SharedString::from(id)).xsmall().label(label);
-            let button = if on { button.primary() } else { button.outline() };
-            button.on_click(cx.listener(move |this, _, _, cx| {
-                f(&mut this.levels, level);
-                this.apply(cx);
-            }))
+        let entity = cx.entity();
+        let check = |id: String, label: &'static str, tooltip: String, on: bool, f: Box<dyn Fn(&mut LevelFilter)>| {
+            let entity = entity.clone();
+            Checkbox::new(SharedString::from(id))
+                .small()
+                .label(label)
+                .tooltip(tooltip)
+                .checked(on)
+                .on_click(move |_, _, cx| {
+                    entity.update(cx, |this, cx| {
+                        f(&mut this.levels);
+                        this.levels_before = None;
+                        this.apply(cx);
+                    });
+                })
         };
+        let mut row = h_flex().gap_3().items_center().child(div().w(px(48.)).text_color(cx.theme().muted_foreground).child("Level"));
         for level in Level::ALL {
             let on = self.levels.accepts(Some(level));
-            row = row.child(toggle(format!("lv-{}", level.as_str()), level.as_str(), on, cx, |levels, level| {
-                if let Some(level) = level {
-                    let mut allowed: Vec<Level> = Level::ALL.into_iter().filter(|l| levels.accepts(Some(*l))).collect();
-                    match allowed.iter().position(|l| *l == level) {
-                        Some(i) => {
-                            allowed.remove(i);
-                        }
-                        None => allowed.push(level),
-                    }
-                    *levels = LevelFilter::only(&allowed, levels.accepts(None));
-                }
-            }));
+            row = row.child(check(format!("lv-{}", level.as_str()), level.as_str(), format!("Show {} entries", level.as_str()), on, Box::new(move |l| flip_level(l, level))));
         }
         let none_on = self.levels.accepts(None);
-        row = row.child(toggle("lv-none".into(), "none", none_on, cx, |levels, _| {
-            let allowed: Vec<Level> = Level::ALL.into_iter().filter(|l| levels.accepts(Some(*l))).collect();
-            *levels = LevelFilter::only(&allowed, !levels.accepts(None));
-        }));
-        row.child(Button::new("lv-warn-up").xsmall().ghost().label("≥ WARN").on_click(cx.listener(|this, _, _, cx| {
-            this.levels = LevelFilter::at_least(Level::Warn, true);
-            this.apply(cx);
-        })))
+        row = row.child(check(
+            "lv-none".into(),
+            "No level",
+            "Entries whose level could not be recognized".into(),
+            none_on,
+            Box::new(|levels| {
+                let allowed: Vec<Level> = Level::ALL.into_iter().filter(|l| levels.accepts(Some(*l))).collect();
+                *levels = LevelFilter::only(&allowed, !levels.accepts(None));
+            }),
+        ));
+        let warn_up = LevelFilter::at_least(Level::Warn, true);
+        let all = self.levels == LevelFilter::default();
+        let warn_on = self.levels == warn_up;
+        row.child(
+            flag("lv-all".into(), "All", "Show every level, including entries without one. Click again to switch back.", all).on_click(
+                cx.listener(|this, _, _, cx| {
+                    // Without an earlier selection to go back to, switching off shows no level at all.
+                    this.toggle_preset(LevelFilter::default(), LevelFilter::only(&[], false), cx);
+                }),
+            ),
+        )
+        .child(
+            flag("lv-warn-up".into(), "WARN and above", "Show WARN, ERROR and FATAL only. Click again to switch back.", warn_on).on_click(
+                cx.listener(move |this, _, _, cx| {
+                    this.toggle_preset(warn_up.clone(), LevelFilter::default(), cx);
+                }),
+            ),
+        )
+    }
+
+    /// Switches a preset on, remembering the selection it replaced; switching it
+    /// off restores that selection, or `fallback` when there is none.
+    fn toggle_preset(&mut self, preset: LevelFilter, fallback: LevelFilter, cx: &mut Context<Self>) {
+        if self.levels == preset {
+            self.levels = self.levels_before.take().unwrap_or(fallback);
+        } else {
+            self.levels_before = Some(std::mem::replace(&mut self.levels, preset));
+        }
+        self.apply(cx);
     }
 
     fn sized(input: &Entity<InputState>, width: f32) -> impl IntoElement {
@@ -234,8 +200,20 @@ impl FilterBar {
     }
 }
 
-fn flag(id: SharedString, label: &'static str, on: bool) -> Button {
-    let button = Button::new(id).xsmall().label(label);
+/// Shows or hides one Level, leaving the other Levels and "No level" as they are.
+fn flip_level(levels: &mut LevelFilter, level: Level) {
+    let mut allowed: Vec<Level> = Level::ALL.into_iter().filter(|l| levels.accepts(Some(*l))).collect();
+    match allowed.iter().position(|l| *l == level) {
+        Some(i) => {
+            allowed.remove(i);
+        }
+        None => allowed.push(level),
+    }
+    *levels = LevelFilter::only(&allowed, levels.accepts(None));
+}
+
+fn flag(id: SharedString, label: &'static str, tooltip: &'static str, on: bool) -> Button {
+    let button = Button::new(id).xsmall().label(label).tooltip(tooltip);
     if on { button.primary() } else { button.ghost() }
 }
 
@@ -243,17 +221,8 @@ impl Render for FilterBar {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let muted = cx.theme().muted_foreground;
         let danger = cx.theme().danger;
-        let time_available = self.time_available;
 
-        let time_row = h_flex()
-            .gap_2()
-            .items_center()
-            .child(div().text_color(muted).child("Time"))
-            .child(Self::sized(&self.time_from, 190.))
-            .child("–")
-            .child(Self::sized(&self.time_to, 190.))
-            .when(!time_available, |s| s.opacity(0.4).child("not available for this file (no full timestamps)"));
-
+        let text_count = self.texts.len();
         let text_rows: Vec<_> = self
             .texts
             .iter()
@@ -264,85 +233,65 @@ impl Render for FilterBar {
                     .items_center()
                     .child(div().w(px(48.)).text_color(muted).child(if i == 0 { "Text" } else { "" }))
                     .child(Self::sized(&row.input, 280.))
-                    .child(flag(format!("aa-{i}").into(), "Aa", row.case_sensitive).on_click(cx.listener(move |this, _, _, cx| {
-                        this.texts[i].case_sensitive ^= true;
-                        this.apply(cx);
-                    })))
-                    .child(flag(format!("re-{i}").into(), ".*", row.regex).on_click(cx.listener(move |this, _, _, cx| {
-                        this.texts[i].regex ^= true;
-                        this.apply(cx);
-                    })))
-                    .child(flag(format!("not-{i}").into(), "¬", row.exclude).on_click(cx.listener(move |this, _, _, cx| {
-                        this.texts[i].exclude ^= true;
-                        this.apply(cx);
-                    })))
-                    .when(self.texts.len() > 1, |s| {
-                        s.child(Button::new(SharedString::from(format!("rm-text-{i}"))).xsmall().ghost().label("×").on_click(
-                            cx.listener(move |this, _, _, cx| {
-                                this.texts.remove(i);
-                                this.apply(cx);
+                    .child(flag(format!("aa-{i}").into(), "Aa Match case", "Case-sensitive matching", row.case_sensitive).on_click(
+                        cx.listener(move |this, _, _, cx| {
+                            this.texts[i].case_sensitive ^= true;
+                            this.apply(cx);
+                        }),
+                    ))
+                    .child(flag(format!("re-{i}").into(), ".* Regex", "Off: * and ? are wildcards. On: regular expression", row.regex).on_click(
+                        cx.listener(move |this, _, _, cx| {
+                            this.texts[i].regex ^= true;
+                            this.apply(cx);
+                        }),
+                    ))
+                    .child(flag(format!("not-{i}").into(), "¬ Exclude", "Hide entries that match (NOT)", row.exclude).on_click(
+                        cx.listener(move |this, _, _, cx| {
+                            this.texts[i].exclude ^= true;
+                            this.apply(cx);
+                        }),
+                    ))
+                    .when(text_count > 1, |s| {
+                        s.child(
+                            Button::new(SharedString::from(format!("rm-text-{i}")))
+                                .xsmall()
+                                .ghost()
+                                .label("× Remove")
+                                .tooltip("Remove this condition")
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.texts.remove(i);
+                                    this.apply(cx);
+                                })),
+                        )
+                    })
+                    .when(i + 1 == text_count, |s| {
+                        s.child(Button::new("add-text").xsmall().outline().label("+ Add text").tooltip("Add another text condition").on_click(
+                            cx.listener(|this, _, window, cx| {
+                                this.add_text_row(window, cx);
+                                cx.notify();
                             }),
                         ))
                     })
             })
             .collect();
 
-        let field_rows: Vec<_> = self
-            .fields
-            .iter()
-            .enumerate()
-            .map(|(i, row)| {
-                h_flex()
-                    .gap_1()
-                    .items_center()
-                    .child(div().w(px(48.)).text_color(muted).child(if i == 0 { "Field" } else { "" }))
-                    .child(Self::sized(&row.path, 160.))
-                    .child(
-                        Button::new(SharedString::from(format!("op-{i}"))).xsmall().outline().label(FIELD_OPS[row.op]).on_click(
-                            cx.listener(move |this, _, _, cx| {
-                                this.fields[i].op = (this.fields[i].op + 1) % FIELD_OPS.len();
-                                this.apply(cx);
-                            }),
-                        ),
-                    )
-                    .child(Self::sized(&row.value, 160.))
-                    .child(flag(format!("fnot-{i}").into(), "¬", row.exclude).on_click(cx.listener(move |this, _, _, cx| {
-                        this.fields[i].exclude ^= true;
-                        this.apply(cx);
-                    })))
-                    .child(Button::new(SharedString::from(format!("rm-field-{i}"))).xsmall().ghost().label("×").on_click(cx.listener(
-                        move |this, _, _, cx| {
-                            this.fields.remove(i);
-                            this.apply(cx);
-                        },
-                    )))
-            })
-            .collect();
-
         v_flex()
             .gap_1()
             .child(self.level_buttons(cx))
-            .child(time_row)
             .children(text_rows)
-            .children(field_rows)
             .child(
                 h_flex()
                     .gap_2()
                     .items_center()
-                    .child(Button::new("add-text").xsmall().ghost().label("+ Text").on_click(cx.listener(|this, _, window, cx| {
-                        this.add_text_row(window, cx);
-                        cx.notify();
-                    })))
-                    .when(self.json, |s| {
-                        s.child(Button::new("add-field").xsmall().ghost().label("+ Field").on_click(cx.listener(|this, _, window, cx| {
-                            this.add_field_row(window, cx);
-                            cx.notify();
-                        })))
-                    })
                     .child(div().text_color(muted).child("Context"))
                     .child(Self::sized(&self.context, 48.))
-                    .child(Button::new("apply").xsmall().primary().label("Apply ⏎").on_click(cx.listener(|this, _, _, cx| this.apply(cx))))
-                    .child(Button::new("clear").xsmall().outline().label("Clear").on_click(cx.listener(|this, _, window, cx| this.clear(window, cx))))
+                    .child(div().text_color(muted).child("entries around each match"))
+                    .child(Button::new("apply").xsmall().primary().label("Apply ⏎").tooltip("Apply the Filter (Enter)").on_click(
+                        cx.listener(|this, _, _, cx| this.apply(cx)),
+                    ))
+                    .child(Button::new("clear").xsmall().outline().label("Clear all").tooltip("Remove every condition").on_click(
+                        cx.listener(|this, _, window, cx| this.clear(window, cx)),
+                    ))
                     .child(div().text_color(muted).child(self.summary.clone()))
                     .children(self.error.clone().map(|e| div().text_color(danger).child(e))),
             )

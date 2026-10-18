@@ -1,25 +1,20 @@
 //! Filter engine: hides every Entry that does not match, optionally keeping
 //! surrounding Context.
 //!
-//! Conditions combine with AND. Text and field conditions can be inverted
-//! (`exclude`). Text conditions look at the whole Entry, continuation lines
+//! Conditions combine with AND. Text conditions can be inverted (`exclude`). Text conditions look at the whole Entry, continuation lines
 //! included, but only its first [`MAX_ENTRY_BYTES`] bytes.
 
-use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::fmt;
 use std::io;
 
-use jiff::Timestamp;
 use jiff::tz::TimeZone;
 use regex::bytes::{Regex, RegexBuilder};
-use serde_json::{Map, Value};
 
 use crate::format::{Format, parse_entry};
 use crate::index::{EntryIndex, EntryRule};
 use crate::level::Level;
 use crate::reader::BlockReader;
-use crate::timestamp::TimestampStyle;
 
 /// Largest Context a Filter may keep around each match.
 pub const MAX_CONTEXT: usize = 50;
@@ -74,8 +69,36 @@ impl LevelFilter {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TextPattern {
-    Literal(String),
+    /// Plain text where `*` stands for any run of characters on a line and
+    /// `?` for any one character; everything else is literal. Text without
+    /// either is a plain substring search.
+    Wildcard(String),
     Regex(String),
+}
+
+impl TextPattern {
+    pub fn is_empty(&self) -> bool {
+        let (Self::Wildcard(s) | Self::Regex(s)) = self;
+        s.is_empty()
+    }
+
+    /// The pattern as regular expression source.
+    pub(crate) fn to_regex_source(&self) -> String {
+        match self {
+            Self::Regex(s) => s.clone(),
+            Self::Wildcard(s) => {
+                let mut source = String::with_capacity(s.len() + 8);
+                for c in s.chars() {
+                    match c {
+                        '*' => source.push_str("[^\\n]*"),
+                        '?' => source.push_str("[^\\n]"),
+                        c => source.push_str(&regex::escape(c.encode_utf8(&mut [0; 4]))),
+                    }
+                }
+                source
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -86,41 +109,13 @@ pub struct TextCondition {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum FieldOp {
-    /// Numbers compare numerically, strings exactly (case-sensitive).
-    Equals(String),
-    /// Case-sensitive substring of the field's text.
-    Contains(String),
-    Regex(String),
-    Gt(f64),
-    Ge(f64),
-    Lt(f64),
-    Le(f64),
-    Exists,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct FieldCondition {
-    /// Dotted path into nested objects, e.g. `req.path`. A key that itself
-    /// contains dots (`log.level`) is found as well.
-    pub path: String,
-    pub op: FieldOp,
-    pub exclude: bool,
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub enum Condition {
     Text(TextCondition),
-    Field(FieldCondition),
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Filter {
     pub levels: LevelFilter,
-    /// Inclusive bounds. Entries without a usable timestamp never pass an
-    /// active time range.
-    pub time_from: Option<Timestamp>,
-    pub time_to: Option<Timestamp>,
     pub conditions: Vec<Condition>,
     /// Entries kept before and after each match (clamped to [`MAX_CONTEXT`]).
     pub context: usize,
@@ -137,18 +132,6 @@ impl fmt::Display for FilterError {
 
 impl std::error::Error for FilterError {}
 
-/// Whether time-range Filtering can work for a file: syslog, time-only and
-/// timestamp-less text carry no full date.
-pub fn time_filter_available(format: Format, rule: EntryRule) -> bool {
-    match format {
-        Format::JsonLines => true,
-        Format::PlainText => matches!(
-            rule,
-            EntryRule::Timestamped(TimestampStyle::Iso8601 | TimestampStyle::Apache)
-        ),
-    }
-}
-
 /// What the matcher needs to know about the file being filtered.
 #[derive(Debug, Clone)]
 pub struct FilterContext {
@@ -157,26 +140,9 @@ pub struct FilterContext {
     pub zone: TimeZone,
 }
 
-enum CompiledOp {
-    Equals(String),
-    Contains(String),
-    Regex(Regex),
-    Compare(Ordering, bool, f64),
-    Exists,
-}
-
-struct CompiledField {
-    path: String,
-    op: CompiledOp,
-    exclude: bool,
-}
-
 pub struct CompiledFilter {
     levels: LevelFilter,
-    time_from: Option<Timestamp>,
-    time_to: Option<Timestamp>,
     texts: Vec<(Regex, bool)>,
-    fields: Vec<CompiledField>,
     context: usize,
     needs_parse: bool,
 }
@@ -191,41 +157,14 @@ pub(crate) fn build_regex(pattern: &str, case_sensitive: bool) -> Result<Regex, 
 impl CompiledFilter {
     pub fn new(filter: &Filter) -> Result<Self, FilterError> {
         let mut texts = Vec::new();
-        let mut fields = Vec::new();
         for condition in &filter.conditions {
-            match condition {
-                Condition::Text(t) => {
-                    let source = match &t.pattern {
-                        TextPattern::Literal(s) => regex::escape(s),
-                        TextPattern::Regex(s) => s.clone(),
-                    };
-                    texts.push((build_regex(&source, t.case_sensitive)?, t.exclude));
-                }
-                Condition::Field(f) => {
-                    let op = match &f.op {
-                        FieldOp::Equals(s) => CompiledOp::Equals(s.clone()),
-                        FieldOp::Contains(s) => CompiledOp::Contains(s.clone()),
-                        FieldOp::Regex(s) => CompiledOp::Regex(build_regex(s, true)?),
-                        FieldOp::Gt(n) => CompiledOp::Compare(Ordering::Greater, false, *n),
-                        FieldOp::Ge(n) => CompiledOp::Compare(Ordering::Greater, true, *n),
-                        FieldOp::Lt(n) => CompiledOp::Compare(Ordering::Less, false, *n),
-                        FieldOp::Le(n) => CompiledOp::Compare(Ordering::Less, true, *n),
-                        FieldOp::Exists => CompiledOp::Exists,
-                    };
-                    fields.push(CompiledField { path: f.path.clone(), op, exclude: f.exclude });
-                }
-            }
+            let Condition::Text(t) = condition;
+            texts.push((build_regex(&t.pattern.to_regex_source(), t.case_sensitive)?, t.exclude));
         }
-        let needs_parse = filter.levels.is_active()
-            || filter.time_from.is_some()
-            || filter.time_to.is_some()
-            || !fields.is_empty();
+        let needs_parse = filter.levels.is_active();
         Ok(Self {
             levels: filter.levels.clone(),
-            time_from: filter.time_from,
-            time_to: filter.time_to,
             texts,
-            fields,
             context: filter.context.min(MAX_CONTEXT),
             needs_parse,
         })
@@ -248,62 +187,7 @@ impl CompiledFilter {
         if !self.levels.accepts(parsed.level) {
             return false;
         }
-        if self.time_from.is_some() || self.time_to.is_some() {
-            let Some(t) = parsed.timestamp else { return false };
-            if self.time_from.is_some_and(|from| t < from) || self.time_to.is_some_and(|to| t > to) {
-                return false;
-            }
-        }
-        self.fields.iter().all(|field| {
-            let value = parsed.fields.as_ref().and_then(|map| get_path(map, &field.path));
-            field.op.test(value) != field.exclude
-        })
-    }
-}
-
-fn get_path<'a>(map: &'a Map<String, Value>, path: &str) -> Option<&'a Value> {
-    if let Some(v) = map.get(path) {
-        return Some(v);
-    }
-    path.match_indices('.').find_map(|(i, _)| match map.get(&path[..i]) {
-        Some(Value::Object(inner)) => get_path(inner, &path[i + 1..]),
-        _ => None,
-    })
-}
-
-fn text_of(value: &Value) -> String {
-    match value {
-        Value::String(s) => s.clone(),
-        Value::Null => "null".to_owned(),
-        other => other.to_string(),
-    }
-}
-
-fn number_of(value: &Value) -> Option<f64> {
-    match value {
-        Value::Number(n) => n.as_f64(),
-        Value::String(s) => s.trim().parse().ok(),
-        _ => None,
-    }
-}
-
-impl CompiledOp {
-    /// Test against a field; a missing field never matches.
-    fn test(&self, value: Option<&Value>) -> bool {
-        let Some(value) = value else { return false };
-        match self {
-            CompiledOp::Exists => true,
-            CompiledOp::Equals(s) => match value {
-                Value::String(v) => v == s,
-                Value::Number(n) => s.trim().parse::<f64>().ok().is_some_and(|t| n.as_f64() == Some(t)),
-                other => text_of(other) == *s,
-            },
-            CompiledOp::Contains(s) => text_of(value).contains(s.as_str()),
-            CompiledOp::Regex(re) => re.is_match(text_of(value).as_bytes()),
-            CompiledOp::Compare(want, or_equal, threshold) => number_of(value)
-                .and_then(|n| n.partial_cmp(threshold))
-                .is_some_and(|got| got == *want || (*or_equal && got == Ordering::Equal)),
-        }
+        true
     }
 }
 
@@ -481,20 +365,16 @@ mod tests {
 
     fn text(s: &str) -> Condition {
         Condition::Text(TextCondition {
-            pattern: TextPattern::Literal(s.to_owned()),
+            pattern: TextPattern::Wildcard(s.to_owned()),
             case_sensitive: true,
             exclude: false,
         })
     }
 
     fn not_text(s: &str) -> Condition {
-        match text(s) {
-            Condition::Text(mut t) => {
-                t.exclude = true;
-                Condition::Text(t)
-            }
-            c => c,
-        }
+        let Condition::Text(mut t) = text(s);
+        t.exclude = true;
+        Condition::Text(t)
     }
 
     const LOG: &str = "\
@@ -539,7 +419,7 @@ mod tests {
         });
         assert_eq!(entries(&run(&fx, &Filter { conditions: vec![re], ..Filter::default() })), vec![3, 5]);
         let ci = Condition::Text(TextCondition {
-            pattern: TextPattern::Literal("SLOW".into()),
+            pattern: TextPattern::Wildcard("SLOW".into()),
             case_sensitive: false,
             exclude: false,
         });
@@ -571,24 +451,6 @@ mod tests {
         assert_eq!(entries(&run(&plain, &without)), vec![1]);
     }
 
-    #[test]
-    fn time_range_is_inclusive_and_skips_entries_without_timestamps() {
-        let fx = fixture(&format!("banner\n{LOG}"));
-        let f = Filter {
-            time_from: Some("2026-10-18T19:50:03Z".parse().unwrap()),
-            time_to: Some("2026-10-18T19:50:05Z".parse().unwrap()),
-            ..Filter::default()
-        };
-        // Entry 0 is the preamble (no timestamp); 3..=5 fall in range.
-        assert_eq!(entries(&run(&fx, &f)), vec![3, 4, 5]);
-        assert!(time_filter_available(fx.ctx.format, fx.ctx.rule));
-        assert!(!time_filter_available(Format::PlainText, EntryRule::PerLine));
-        assert!(!time_filter_available(
-            Format::PlainText,
-            EntryRule::Timestamped(TimestampStyle::Syslog)
-        ));
-    }
-
     const JSON: &str = "\
 {\"level\":\"info\",\"user_id\":42,\"duration_ms\":120,\"req\":{\"path\":\"/api/items\"}}
 {\"level\":\"error\",\"user_id\":7,\"duration_ms\":900,\"req\":{\"path\":\"/api/pay\"},\"log.level\":\"x\"}
@@ -596,36 +458,32 @@ mod tests {
 {\"level\":\"info\",\"msg\":\"no fields\"}
 ";
 
-    fn field(path: &str, op: FieldOp, exclude: bool) -> Condition {
-        Condition::Field(FieldCondition { path: path.into(), op, exclude })
-    }
-
-    #[test]
-    fn field_conditions_on_json() {
-        let fx = fixture(JSON);
-        let run_one = |c| entries(&run(&fx, &Filter { conditions: vec![c], ..Filter::default() }));
-        assert_eq!(run_one(field("user_id", FieldOp::Equals("42".into()), false)), vec![0, 2]);
-        assert_eq!(run_one(field("duration_ms", FieldOp::Gt(500.0), false)), vec![1, 2]);
-        assert_eq!(run_one(field("duration_ms", FieldOp::Le(120.0), false)), vec![0]);
-        assert_eq!(run_one(field("req.path", FieldOp::Contains("/api".into()), false)), vec![0, 1]);
-        assert_eq!(run_one(field("req.path", FieldOp::Regex("^/(pay|health)".into()), false)), vec![2]);
-        assert_eq!(run_one(field("log.level", FieldOp::Exists, false)), vec![1]);
-        // A missing field never matches, so excluding keeps those Entries.
-        assert_eq!(run_one(field("user_id", FieldOp::Equals("42".into()), true)), vec![1, 3]);
-    }
-
-    #[test]
-    fn field_conditions_never_match_plain_text() {
-        let fx = fixture(LOG);
-        let f = Filter { conditions: vec![field("a", FieldOp::Exists, false)], ..Filter::default() };
-        assert!(run(&fx, &f).is_empty());
-    }
-
     #[test]
     fn level_filter_applies_to_json_lines() {
         let fx = fixture(JSON);
         let f = Filter { levels: LevelFilter::at_least(Level::Warn, true), ..Filter::default() };
         assert_eq!(entries(&run(&fx, &f)), vec![1, 2]);
+    }
+
+    #[test]
+    fn wildcards_match_within_a_line_and_everything_else_is_literal() {
+        let fx = fixture(LOG);
+        let run_text = |pattern: &str| {
+            let c = Condition::Text(TextCondition {
+                pattern: TextPattern::Wildcard(pattern.into()),
+                case_sensitive: false,
+                exclude: false,
+            });
+            entries(&run(&fx, &Filter { conditions: vec![c], ..Filter::default() }))
+        };
+        assert!(!run_text("healthcheck").is_empty());
+        assert_eq!(run_text("slow*query"), run_text("slow query"));
+        assert_eq!(run_text("health?heck"), run_text("healthcheck"));
+        assert_eq!(run_text("h*k ok"), run_text("healthcheck ok"));
+        // Characters special to regular expressions are literal here.
+        assert!(run_text("(").is_empty() && run_text("a.c").is_empty());
+        // `*` does not cross lines: the failure and its stack trace are two lines.
+        assert!(run_text("failed*handler").is_empty());
     }
 
     #[test]

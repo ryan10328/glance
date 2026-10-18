@@ -53,7 +53,7 @@ Multi-file merged timeline, OS file association, saving Filter results to a file
 - Time zone: timestamps without a zone use the local zone, with a per-file override; displayed text is never altered.
 
 ### 6. Filter engine (core)
-- Conditions: Level (multi-select, "WARN and above", separate "no Level" option, default on), time range, text/regex, structured field; combined with AND.
+- Conditions: Level (multi-select, "WARN and above", separate "no Level" option, default on), text (wildcard or regex, case-sensitivity toggle); combined with AND.
 - Context: keep N Entries around each match.
 - Runs over the indexed range only and updates as indexing progresses.
 
@@ -87,7 +87,7 @@ Multi-file merged timeline, OS file association, saving Filter results to a file
 
 ### 14. Detail panel (ui)
 - Selected Entry in full: pretty-printed JSON for JSON lines, full text otherwise.
-- Copy a field value; add a field value to the Filter.
+- Copy a field value.
 
 ### 15. Keyboard shortcuts (ui)
 - Desktop conventions with Cmd on macOS and Ctrl elsewhere; `less`-style single keys (`/`, `n`, `N`, `G`) when no input has focus.

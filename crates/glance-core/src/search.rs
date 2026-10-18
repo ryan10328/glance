@@ -74,12 +74,7 @@ pub struct Search {
 
 impl Search {
     pub fn new(query: &SearchQuery) -> Result<Self, FilterError> {
-        let source = match &query.pattern {
-            TextPattern::Literal(s) if s.is_empty() => None,
-            TextPattern::Regex(s) if s.is_empty() => None,
-            TextPattern::Literal(s) => Some(regex::escape(s)),
-            TextPattern::Regex(s) => Some(s.clone()),
-        };
+        let source = (!query.pattern.is_empty()).then(|| query.pattern.to_regex_source());
         let regex = source.map(|s| build_regex(&s, query.case_sensitive)).transpose()?;
         Ok(Self { regex, matches: Vec::new(), scanned: 0 })
     }
@@ -205,7 +200,7 @@ mod tests {
     }
 
     fn query(text: &str) -> SearchQuery {
-        SearchQuery { pattern: TextPattern::Literal(text.to_owned()), case_sensitive: false }
+        SearchQuery { pattern: TextPattern::Wildcard(text.to_owned()), case_sensitive: false }
     }
 
     fn search_all(fx: &Fixture, q: &SearchQuery) -> Search {
@@ -270,7 +265,7 @@ mod tests {
         let fx = fixture(LOG);
         // Hide the healthchecks: remaining Entries are 0, 2, 4.
         let hide = Condition::Text(TextCondition {
-            pattern: TextPattern::Literal("healthcheck".into()),
+            pattern: TextPattern::Wildcard("healthcheck".into()),
             case_sensitive: true,
             exclude: true,
         });

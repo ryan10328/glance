@@ -1,5 +1,6 @@
 mod app;
 mod filter_bar;
+mod search_bar;
 mod tab_view;
 
 use std::path::PathBuf;
@@ -7,14 +8,19 @@ use std::path::PathBuf;
 use gpui_kit::*;
 
 use app::GlanceApp;
-use tab_view::CopySelection;
+use tab_view::{CloseSearch, CopySelection, OpenSearch};
 
 fn main() {
     let args: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
     gpui_kit::application().run(move |cx| {
         gpui_kit::init(cx);
         let copy = if cfg!(target_os = "macos") { "cmd-c" } else { "ctrl-c" };
-        cx.bind_keys([KeyBinding::new(copy, CopySelection, Some("EntryView"))]);
+        let find = if cfg!(target_os = "macos") { "cmd-f" } else { "ctrl-f" };
+        cx.bind_keys([
+            KeyBinding::new(copy, CopySelection, Some("EntryView")),
+            KeyBinding::new(find, OpenSearch, None),
+            KeyBinding::new("escape", CloseSearch, Some("SearchBar")),
+        ]);
         let state = GlanceApp::load_state();
         let size = state.window.map_or(size(px(1100.), px(720.)), |w| size(px(w.width as f32), px(w.height as f32)));
         let options = WindowOptions {

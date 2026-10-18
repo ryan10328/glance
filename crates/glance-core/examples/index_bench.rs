@@ -53,7 +53,7 @@ fn main() -> std::io::Result<()> {
 
     let filter = Filter {
         conditions: vec![Condition::Text(TextCondition {
-            pattern: TextPattern::Literal("ERROR".into()),
+            pattern: TextPattern::Wildcard("ERROR".into()),
             case_sensitive: true,
             exclude: false,
         })],
