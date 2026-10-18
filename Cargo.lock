@@ -2008,6 +2008,7 @@ version = "0.1.0"
 dependencies = [
  "glance-core",
  "gpui-kit",
+ "jiff",
 ]
 
 [[package]]

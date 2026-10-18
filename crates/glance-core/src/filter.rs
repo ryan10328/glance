@@ -374,6 +374,17 @@ impl FilteredView {
         Some(ViewRow { entry: (raw & !CONTEXT_FLAG) as usize, is_match: raw & CONTEXT_FLAG == 0 })
     }
 
+    /// The row showing `entry`, if it is visible.
+    pub fn row_of(&self, entry: usize) -> Option<usize> {
+        let row = self.first_row_at_or_after(entry);
+        (self.row(row)?.entry == entry).then_some(row)
+    }
+
+    /// The first row showing an Entry numbered `entry` or higher; `len()` if none.
+    pub fn first_row_at_or_after(&self, entry: usize) -> usize {
+        self.kept.partition_point(|&raw| ((raw & !CONTEXT_FLAG) as usize) < entry)
+    }
+
     /// Examines up to `max_entries` Entries and returns how many were new
     /// since the last call. The newest Entry is re-examined on every call
     /// because it may have grown. Call repeatedly until it returns 0.
@@ -644,6 +655,19 @@ mod tests {
         let stepped: Vec<ViewRow> = (0..view.len()).map(|r| view.row(r).unwrap()).collect();
         assert_eq!(stepped, whole);
         assert_eq!(view.match_count(), 100);
+    }
+
+    #[test]
+    fn rows_can_be_looked_up_by_entry() {
+        let fx = fixture(LOG);
+        let compiled = CompiledFilter::new(&Filter { conditions: vec![text("healthcheck")], ..Filter::default() }).unwrap();
+        let mut view = FilteredView::new();
+        view.update(&compiled, &fx.index, &fx.reader, &fx.ctx, usize::MAX).unwrap();
+        assert_eq!(view.row_of(1), Some(0));
+        assert_eq!(view.row_of(4), Some(1));
+        assert_eq!(view.row_of(2), None);
+        assert_eq!(view.first_row_at_or_after(2), 1);
+        assert_eq!(view.first_row_at_or_after(99), view.len());
     }
 
     #[test]

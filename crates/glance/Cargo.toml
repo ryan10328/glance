@@ -7,3 +7,4 @@ license.workspace = true
 [dependencies]
 glance-core = { path = "../glance-core" }
 gpui-kit = "0.7.3"
+jiff = "0.2.38"

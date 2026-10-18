@@ -1,10 +1,13 @@
 mod app;
+mod filter_bar;
+mod tab_view;
 
 use std::path::PathBuf;
 
 use gpui_kit::*;
 
-use app::{CopySelection, GlanceApp};
+use app::GlanceApp;
+use tab_view::CopySelection;
 
 fn main() {
     let args: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();

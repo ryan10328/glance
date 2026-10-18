@@ -193,6 +193,22 @@ fn strip_bracket(line: &[u8]) -> &[u8] {
     line.strip_prefix(b"[").unwrap_or(line)
 }
 
+/// Parses a timestamp typed by the user (`2026-10-18 19:50:03`, optional
+/// fraction and offset, or just a date meaning midnight). Without an offset it
+/// is read in `zone`.
+pub fn parse_user_timestamp(text: &str, zone: &TimeZone) -> Option<Timestamp> {
+    let text = text.trim();
+    let full;
+    let bytes = if text.len() == 10 {
+        full = format!("{text} 00:00:00");
+        full.as_bytes()
+    } else {
+        text.as_bytes()
+    };
+    let (instant, consumed) = parse_iso(bytes, zone)?;
+    (consumed == bytes.len()).then_some(instant)
+}
+
 /// Parses an ISO-8601-like timestamp at the start of `s`. Returns the instant
 /// and the number of bytes consumed. Timestamps without an offset are read in
 /// `zone`.
@@ -350,6 +366,18 @@ mod tests {
         };
         let taipei = TimeZone::get("Asia/Taipei").unwrap();
         assert_eq!(naive(&utc()).as_second() - naive(&taipei).as_second(), 8 * 3600);
+    }
+
+    #[test]
+    fn user_typed_timestamps() {
+        let z = utc();
+        let t = |s: &str| parse_user_timestamp(s, &z).map(|t| t.as_second());
+        assert_eq!(t("2026-10-18 19:50:03"), Some(1792353003));
+        assert_eq!(t("2026-10-18T19:50:03Z"), Some(1792353003));
+        assert_eq!(t(" 2026-10-18 "), Some(1792281600));
+        assert_eq!(t("2026-10-18 19:50:03 garbage"), None);
+        assert_eq!(t("yesterday"), None);
+        assert_eq!(t(""), None);
     }
 
     #[test]

@@ -1,7 +1,8 @@
-//! Row selection: click, Shift-click range and Cmd/Ctrl-click toggle.
+//! Entry selection: click, Shift-click range and Cmd/Ctrl-click toggle.
 //!
-//! Stored as sorted, disjoint ranges so selecting millions of rows costs
-//! nothing. Rows are row numbers of the view, not Entry numbers.
+//! Stored as sorted, disjoint ranges of Entry numbers (not view rows), so the
+//! selection survives a change of Filter: Entries that become hidden are
+//! dropped with [`Selection::retain`], the rest stay selected.
 
 use std::ops::Range;
 
@@ -42,12 +43,31 @@ impl Selection {
         self.anchor = Some(row);
     }
 
-    /// Shift-click: select from the anchor to `row`, replacing the selection.
-    pub fn extend_to(&mut self, row: usize) {
-        match self.anchor {
-            Some(anchor) => self.ranges = std::iter::once(anchor.min(row)..anchor.max(row) + 1).collect(),
-            None => self.click(row),
+    /// The Entry a Shift-click range grows from.
+    pub fn anchor(&self) -> Option<usize> {
+        self.anchor
+    }
+
+    /// Shift-click: replaces the selection with `entries` (ascending, the
+    /// Entries between the anchor and the clicked one as the view shows them)
+    /// and keeps the anchor.
+    pub fn replace_with(&mut self, entries: impl IntoIterator<Item = usize>) {
+        let mut ranges: Vec<Range<usize>> = Vec::new();
+        for entry in entries {
+            match ranges.last_mut() {
+                Some(last) if last.end == entry => last.end += 1,
+                _ => ranges.push(entry..entry + 1),
+            }
         }
+        self.ranges = ranges;
+    }
+
+    /// Keeps only the selected Entries for which `keep` is true.
+    pub fn retain(&mut self, keep: impl Fn(usize) -> bool) {
+        let kept: Vec<usize> = self.rows().filter(|&e| keep(e)).collect();
+        let anchor = self.anchor;
+        self.replace_with(kept);
+        self.anchor = anchor;
     }
 
     /// Cmd/Ctrl-click: add `row`, or remove it when already selected.
@@ -99,16 +119,23 @@ mod tests {
     }
 
     #[test]
-    fn shift_click_selects_a_range_from_the_anchor_in_either_direction() {
+    fn replace_with_builds_ranges_and_keeps_the_anchor() {
         let mut s = Selection::default();
         s.click(10);
-        s.extend_to(13);
-        assert_eq!(rows(&s), vec![10, 11, 12, 13]);
-        s.extend_to(8);
-        assert_eq!(rows(&s), vec![8, 9, 10]);
-        let mut fresh = Selection::default();
-        fresh.extend_to(4);
-        assert_eq!(rows(&fresh), vec![4]);
+        s.replace_with([10, 11, 12, 20, 21]);
+        assert_eq!(rows(&s), vec![10, 11, 12, 20, 21]);
+        assert_eq!(s.ranges, vec![10..13, 20..22]);
+        assert_eq!(s.anchor(), Some(10));
+    }
+
+    #[test]
+    fn retain_drops_hidden_entries() {
+        let mut s = Selection::default();
+        s.click(1);
+        s.replace_with(1..8);
+        s.retain(|e| e % 2 == 0);
+        assert_eq!(rows(&s), vec![2, 4, 6]);
+        assert_eq!(s.anchor(), Some(1));
     }
 
     #[test]
@@ -129,8 +156,7 @@ mod tests {
     #[test]
     fn huge_ranges_are_cheap() {
         let mut s = Selection::default();
-        s.click(0);
-        s.extend_to(50_000_000);
+        s.replace_with(0..=50_000_000);
         assert_eq!(s.len(), 50_000_001);
         assert!(s.contains(25_000_000) && !s.contains(50_000_001));
         s.toggle(10);
@@ -142,7 +168,7 @@ mod tests {
         let mut s = Selection::default();
         s.click(3);
         s.clear();
-        s.extend_to(9);
-        assert_eq!(rows(&s), vec![9]);
+        assert_eq!(s.anchor(), None);
+        assert!(s.is_empty());
     }
 }
