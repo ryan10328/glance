@@ -421,6 +421,8 @@ impl Render for GlanceApp {
                 let warn = if tab.file().rotated().is_some() { "⚠ " } else { "" };
                 Tab::new().label(format!("{warn}{}", tab.title())).suffix(
                     Button::new(("close", i)).ghost().xsmall().label("×").on_click(cx.listener(move |this, _, _, cx| {
+                        // The click would otherwise also reach the Tab and select it.
+                        cx.stop_propagation();
                         this.close(i);
                         cx.notify();
                     })),
@@ -430,7 +432,10 @@ impl Render for GlanceApp {
         let tab_bar = TabBar::new("tabs")
             .selected_index(self.active)
             .on_click(cx.listener(|this, ix: &usize, _, cx| {
-                this.active = *ix;
+                // A close button's click can arrive after its Tab is gone.
+                if *ix < this.tabs.len() {
+                    this.active = *ix;
+                }
                 cx.notify();
             }))
             .children(tabs)
@@ -441,10 +446,9 @@ impl Render for GlanceApp {
                     .child(self.render_theme_menu(cx))
                     .child(Button::new("settings").ghost().small().icon(IconName::Settings).tooltip("Settings (Cmd/Ctrl+,)").on_click(cx.listener(|this, _, _, cx| this.open_settings(cx)))),
             );
-        let body = if self.tabs.is_empty() {
-            self.render_welcome(cx).into_any_element()
-        } else {
-            self.tabs[self.active].clone().into_any_element()
+        let body = match self.tabs.get(self.active) {
+            Some(tab) => tab.clone().into_any_element(),
+            None => self.render_welcome(cx).into_any_element(),
         };
         v_flex()
             .size_full()
