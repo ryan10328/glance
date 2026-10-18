@@ -12,6 +12,7 @@ use glance_core::session::{LogFile, Polled};
 use glance_core::settings::{self, Config, State, WindowSize};
 use glance_core::watch::Rotation;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -42,11 +43,19 @@ struct OpenTab {
     scroll_x: f32,
     /// Longest first line seen so far, in characters; bounds `scroll_x`.
     max_chars: Rc<Cell<usize>>,
+    /// Vertical position of the Entry view, shared with its scrollbar.
+    list_scroll: UniformListScrollHandle,
 }
 
 impl OpenTab {
     fn new(file: LogFile) -> Self {
-        Self { file, selection: Selection::default(), scroll_x: 0.0, max_chars: Rc::new(Cell::new(0)) }
+        Self {
+            file,
+            selection: Selection::default(),
+            scroll_x: 0.0,
+            max_chars: Rc::new(Cell::new(0)),
+            list_scroll: UniformListScrollHandle::new(),
+        }
     }
 
     fn title(&self) -> String {
@@ -304,6 +313,7 @@ impl GlanceApp {
         let selection = tab.selection.clone();
         let scroll_x = tab.scroll_x;
         let max_chars = tab.max_chars.clone();
+        let list_scroll = tab.list_scroll.clone();
         let family: SharedString = self.config.font_family.clone().unwrap_or_else(|| DEFAULT_FONT.to_owned()).into();
         let font_size = self.font_size();
         let row_height = self.row_height();
@@ -362,9 +372,11 @@ impl GlanceApp {
                     .collect::<Vec<_>>()
             }),
         )
+        .track_scroll(&list_scroll)
         .size_full();
         div()
             .id("entry-view")
+            .relative()
             .flex_1()
             .min_h_0()
             .font_family(family)
@@ -381,6 +393,11 @@ impl GlanceApp {
                 }
             }))
             .child(list)
+            .child(
+                div().absolute().top_0().right_0().bottom_0().w(Scrollbar::width()).child(
+                    Scrollbar::vertical(&list_scroll).mode(ScrollbarMode::Always).viewport_from_layout(),
+                ),
+            )
     }
 
     fn select_row(&mut self, row: usize, modifiers: Modifiers) {
