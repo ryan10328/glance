@@ -16,7 +16,7 @@ Multi-file merged timeline, OS file association, saving Filter results to a file
 - [x] 6. Filter engine
 - [x] 7. Search engine
 - [x] 8. Rotation detection and Follow Tail data path
-- [ ] 9. Window shell and Tabs
+- [x] 9. Window shell and Tabs
 - [ ] 10. Virtualized Entry view
 - [ ] 11. Filter and Search UI
 - [ ] 12. Highlighting

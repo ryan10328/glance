@@ -1,3 +1,25 @@
+mod app;
+
+use std::path::PathBuf;
+
+use gpui_kit::*;
+
+use app::GlanceApp;
+
 fn main() {
-    println!("Hello, world!");
+    let args: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
+    gpui_kit::application().run(move |cx| {
+        gpui_kit::init(cx);
+        let state = GlanceApp::load_state();
+        let size = state.window.map_or(size(px(1100.), px(720.)), |w| size(px(w.width as f32), px(w.height as f32)));
+        let options = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size, cx))),
+            ..WindowOptions::default()
+        };
+        gpui_kit::open_window(options, cx, move |window, cx| {
+            cx.new(|cx| GlanceApp::new(args.clone(), state.clone(), window, cx))
+        })
+            .expect("failed to open window");
+        cx.activate(true);
+    });
 }
