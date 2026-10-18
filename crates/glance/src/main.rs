@@ -15,7 +15,8 @@ use tab_view::{CloseSearch, CopySelection, OpenSearch};
 
 fn main() {
     let args: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
-    gpui_kit::application().run(move |cx| {
+    // The bundled icons: components such as the Checkbox draw their marks from them.
+    gpui_kit::application().with_assets(gpui_kit::assets::Assets).run(move |cx| {
         gpui_kit::init(cx);
         theme::install_softer_dark(cx);
         let copy = if cfg!(target_os = "macos") { "cmd-c" } else { "ctrl-c" };
