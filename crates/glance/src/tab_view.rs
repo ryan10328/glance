@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use glance_core::entry;
 use glance_core::filter::{CompiledFilter, FilterContext, FilteredView, ViewRow, };
-use glance_core::format::resolve_time_zone;
+use glance_core::format::{parse_entry, resolve_time_zone};
 use glance_core::search::{AllEntries, Direction, Rows, Search, SearchQuery};
 use glance_core::selection::Selection;
 use glance_core::session::{LogFile, Polled};
@@ -21,6 +21,7 @@ use gpui_kit::*;
 use jiff::tz::TimeZone;
 
 use crate::filter_bar::{FilterBar, FilterBarEvent};
+use crate::level_style::{LevelPalette, LevelStyle};
 use crate::search_bar::{SearchBar, SearchBarEvent};
 
 actions!(glance, [CopySelection, OpenSearch, CloseSearch]);
@@ -501,9 +502,10 @@ impl TabView {
         let family: SharedString = self.config.font_family.clone().unwrap_or_else(|| DEFAULT_FONT.to_owned()).into();
         let font_size = self.font_size();
         let row_height = (font_size * 1.5).ceil();
-        let (muted, selected_bg, hover_bg, current_bg) = {
+        let palette = LevelPalette::new(cx);
+        let (muted, selected_bg, hover_bg, current_bg, found_bg) = {
             let theme = cx.theme();
-            (theme.muted_foreground, theme.list_active, theme.list_hover, theme.accent)
+            (theme.muted_foreground, theme.list_active, theme.list_hover, theme.accent, theme.warning)
         };
         let list = uniform_list(
             "entries",
@@ -521,6 +523,18 @@ impl TabView {
                         let (text, extra, more) =
                             summary.map_or((String::new(), 0, false), |s| (s.first_line, s.extra_lines, s.more));
                         max_chars.set(max_chars.get().max(text.chars().count() + 12));
+                        let level = parse_entry(this.ctx.format, this.ctx.rule, text.as_bytes(), &this.ctx.zone).level;
+                        let LevelStyle { tint, faded } = palette.style(level);
+                        // Search occurrences in the visible first line.
+                        let found: Vec<_> = this
+                            .search
+                            .as_ref()
+                            .map(|s| s.occurrences(text.as_bytes()))
+                            .unwrap_or_default()
+                            .into_iter()
+                            .filter(|r| text.is_char_boundary(r.start) && text.is_char_boundary(r.end))
+                            .map(|r| (r, HighlightStyle { background_color: Some(found_bg.opacity(0.55)), ..Default::default() }))
+                            .collect();
                         let badge = (extra > 0).then(|| format!("  [+{extra}{} lines]", if more { "+" } else { "" }));
                         Some(
                             h_flex()
@@ -529,6 +543,7 @@ impl TabView {
                                 .w_full()
                                 .flex_none()
                                 .when(!view_row.is_match, |s| s.opacity(0.55))
+                                .when_some(tint, |s, tint| s.bg(tint))
                                 .when(selection.contains(entry_no), |s| s.bg(selected_bg))
                                 .when(this.search_current == Some(row), |s| s.bg(current_bg))
                                 .hover(|s| s.bg(hover_bg))
@@ -547,7 +562,8 @@ impl TabView {
                                             .relative()
                                             .left(px(-scroll_x))
                                             .whitespace_nowrap()
-                                            .child(text)
+                                            .when(faded, |s| s.text_color(muted))
+                                            .child(StyledText::new(text).with_highlights(found))
                                             .children(badge.map(|b| div().text_color(muted).child(b))),
                                     ),
                                 )

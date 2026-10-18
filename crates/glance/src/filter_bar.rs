@@ -4,6 +4,8 @@ use glance_core::filter::{
     Condition, Filter, LevelFilter, TextCondition, TextPattern, MAX_CONTEXT,
 };
 use glance_core::level::Level;
+
+use crate::level_style::LevelPalette;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
@@ -133,11 +135,23 @@ impl FilterBar {
 
     fn level_buttons(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let entity = cx.entity();
-        let check = |id: String, label: &'static str, tooltip: String, on: bool, f: Box<dyn Fn(&mut LevelFilter)>| {
+        let palette = LevelPalette::new(cx);
+        let check = |id: String, label: &'static str, level: Option<Level>, tooltip: String, on: bool, f: Box<dyn Fn(&mut LevelFilter)>| {
             let entity = entity.clone();
+            let style = palette.style(level);
             Checkbox::new(SharedString::from(id))
                 .small()
-                .label(label)
+                .accessibility_label(label)
+                .child(
+                    // The label wears the Level's color from the Entry view; a hidden Level fades.
+                    div()
+                        .px_1()
+                        .rounded_sm()
+                        .when(!on, |s| s.opacity(0.45))
+                        .when_some(style.tint, |s, tint| s.bg(tint))
+                        .when(style.faded, |s| s.text_color(palette.muted()))
+                        .child(label),
+                )
                 .tooltip(tooltip)
                 .checked(on)
                 .on_click(move |_, _, cx| {
@@ -151,12 +165,13 @@ impl FilterBar {
         let mut row = h_flex().gap_3().items_center().child(div().w(px(48.)).text_color(cx.theme().muted_foreground).child("Level"));
         for level in Level::ALL {
             let on = self.levels.accepts(Some(level));
-            row = row.child(check(format!("lv-{}", level.as_str()), level.as_str(), format!("Show {} entries", level.as_str()), on, Box::new(move |l| flip_level(l, level))));
+            row = row.child(check(format!("lv-{}", level.as_str()), level.as_str(), Some(level), format!("Show {} entries", level.as_str()), on, Box::new(move |l| flip_level(l, level))));
         }
         let none_on = self.levels.accepts(None);
         row = row.child(check(
             "lv-none".into(),
             "No level",
+            None,
             "Entries whose level could not be recognized".into(),
             none_on,
             Box::new(|levels| {

@@ -18,8 +18,10 @@ Multi-file merged timeline, OS file association, saving Filter results to a file
 - [x] 8. Rotation detection and Follow Tail data path
 - [x] 9. Window shell and Tabs
 - [x] 10. Virtualized Entry view
-- [ ] 11. Filter and Search UI
-- [ ] 12. Highlighting
+- [x] 11. Filter and Search UI
+- [ ] 12a. Level coloring and Search occurrence highlighting
+- [ ] 12b. User Highlight Rules from `config.toml`
+- [ ] 12c. Settings window
 - [ ] 13. Follow Tail UI
 - [ ] 14. Detail panel
 - [ ] 15. Keyboard shortcuts
@@ -74,12 +76,14 @@ Multi-file merged timeline, OS file association, saving Filter results to a file
 - Entry selection (click, Shift range, Cmd/Ctrl add) and copy of full Entries including continuation lines.
 
 ### 11. Filter and Search UI (ui)
-- Controls for every Filter condition, Search box with next/previous and count.
-- "Show Context" for a single Entry and N-Entries-around-match option; jump to next ERROR-or-above.
+- Filter bar: Level checkboxes (with All and "WARN and above" presets), text conditions (wildcard or regex, case-sensitivity, exclude) and Context N. Field and time conditions were dropped by design.
+- Search bar: live search, next/previous, count, case-sensitivity and regex toggles.
+- "Show Context" for a single Entry and jump to next ERROR-or-above moved to tickets 14 and 15.
 
-### 12. Highlighting (ui + core)
-- Built-in Level rules coloring the whole Entry; user rules with scope (whole Entry or matching text) and ordering.
-- Settings window editing `config.toml`; direct file edits are respected.
+### 12. Highlighting (ui + core), in three steps
+- 12a: built-in Level rules coloring the whole Entry; mark Search occurrences in the visible first line.
+- 12b: user rules from `config.toml` with scope (whole Entry or matching text) and ordering.
+- 12c: settings window editing `config.toml` (rules, font, time zone); direct file edits are respected.
 
 ### 13. Follow Tail UI (ui)
 - Toggle, auto-pause when scrolling up, resume at the bottom or by button.
@@ -88,8 +92,11 @@ Multi-file merged timeline, OS file association, saving Filter results to a file
 ### 14. Detail panel (ui)
 - Selected Entry in full: pretty-printed JSON for JSON lines, full text otherwise.
 - Copy a field value.
+- "Show Context" for a single Entry (moved from ticket 11): show the Entries around the selected one without a Filter.
+- Mark Search occurrences that fall outside the first line (the Entry view shows only the first line).
 
 ### 15. Keyboard shortcuts (ui)
+- Jump to the next ERROR-or-above Entry (moved from ticket 11).
 - Desktop conventions with Cmd on macOS and Ctrl elsewhere; `less`-style single keys (`/`, `n`, `N`, `G`) when no input has focus.
 
 ### 16. Bookmarks (low priority)
