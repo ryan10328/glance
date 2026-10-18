@@ -41,6 +41,27 @@ fn read_full_at(file: &File, buf: &mut [u8], mut offset: u64) -> io::Result<usiz
     Ok(filled)
 }
 
+/// Identity of a file on disk, used to tell whether a path now points to a
+/// different file (Rotation).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FileId(u64, u64);
+
+impl FileId {
+    #[cfg(unix)]
+    pub fn of(meta: &std::fs::Metadata) -> FileId {
+        use std::os::unix::fs::MetadataExt;
+        FileId(meta.dev(), meta.ino())
+    }
+
+    /// Windows has no stable public file index in std; the creation time
+    /// changes when a file is replaced, which is what Rotation detection needs.
+    #[cfg(windows)]
+    pub fn of(meta: &std::fs::Metadata) -> FileId {
+        use std::os::windows::fs::MetadataExt;
+        FileId(0, meta.creation_time())
+    }
+}
+
 #[derive(Default)]
 struct Cache {
     blocks: HashMap<u64, Arc<[u8]>>,
@@ -94,6 +115,11 @@ impl BlockReader {
     /// (truncation), so it is queried each time.
     pub fn len(&self) -> io::Result<u64> {
         Ok(self.file.metadata()?.len())
+    }
+
+    /// Identity of the open file (not of whatever the path points to now).
+    pub fn file_id(&self) -> io::Result<FileId> {
+        Ok(FileId::of(&self.file.metadata()?))
     }
 
     pub fn is_empty(&self) -> io::Result<bool> {

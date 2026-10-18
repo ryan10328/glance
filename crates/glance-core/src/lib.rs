@@ -4,5 +4,7 @@ pub mod index;
 pub mod level;
 pub mod reader;
 pub mod search;
+pub mod session;
 pub mod settings;
 pub mod timestamp;
+pub mod watch;
