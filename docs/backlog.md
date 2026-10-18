@@ -14,7 +14,7 @@ Multi-file merged timeline, OS file association, saving Filter results to a file
 - [x] 4. Incremental Entry index
 - [x] 5. Format Detection and parsers
 - [x] 6. Filter engine
-- [ ] 7. Search engine
+- [x] 7. Search engine
 - [ ] 8. Rotation detection and Follow Tail data path
 - [ ] 9. Window shell and Tabs
 - [ ] 10. Virtualized Entry view

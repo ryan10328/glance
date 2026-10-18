@@ -131,7 +131,7 @@ pub struct FilterError(String);
 
 impl fmt::Display for FilterError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "invalid filter: {}", self.0)
+        write!(f, "invalid pattern: {}", self.0)
     }
 }
 
@@ -181,7 +181,7 @@ pub struct CompiledFilter {
     needs_parse: bool,
 }
 
-fn build_regex(pattern: &str, case_sensitive: bool) -> Result<Regex, FilterError> {
+pub(crate) fn build_regex(pattern: &str, case_sensitive: bool) -> Result<Regex, FilterError> {
     RegexBuilder::new(pattern)
         .case_insensitive(!case_sensitive)
         .build()
@@ -307,6 +307,16 @@ impl CompiledOp {
     }
 }
 
+/// Reads the first [`MAX_ENTRY_BYTES`] bytes of Entry `i` into `buf`.
+pub(crate) fn read_entry(index: &EntryIndex, reader: &BlockReader, i: usize, buf: &mut Vec<u8>) -> io::Result<()> {
+    let range = index.entry_range(i).expect("entry within index");
+    let len = ((range.end - range.start) as usize).min(MAX_ENTRY_BYTES);
+    buf.resize(len, 0);
+    let n = reader.read_at(range.start, buf)?;
+    buf.truncate(n);
+    Ok(())
+}
+
 /// A row of a [`FilteredView`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ViewRow {
@@ -383,7 +393,8 @@ impl FilteredView {
             self.after_left = s.after_left;
             self.matches = s.matches;
         }
-        let end = index.len().min(self.next.saturating_add(max_entries));
+        // The budget counts new Entries only; the re-examined newest one is extra.
+        let end = index.len().min(seen.saturating_add(max_entries));
         let mut buf = Vec::new();
         for i in self.next..end {
             if i + 1 == index.len() {
@@ -395,11 +406,7 @@ impl FilteredView {
                     matches: self.matches,
                 });
             }
-            let range = index.entry_range(i).expect("entry within index");
-            let len = ((range.end - range.start) as usize).min(MAX_ENTRY_BYTES);
-            buf.resize(len, 0);
-            let n = reader.read_at(range.start, &mut buf)?;
-            buf.truncate(n);
+            read_entry(index, reader, i, &mut buf)?;
             self.process(i as u32, filter.matches(&buf, ctx), filter.context);
         }
         self.next = end;
@@ -637,6 +644,17 @@ mod tests {
         let stepped: Vec<ViewRow> = (0..view.len()).map(|r| view.row(r).unwrap()).collect();
         assert_eq!(stepped, whole);
         assert_eq!(view.match_count(), 100);
+    }
+
+    #[test]
+    fn single_entry_steps_still_make_progress() {
+        let fx = fixture(LOG);
+        let f = Filter { conditions: vec![text("ERROR")], ..Filter::default() };
+        let compiled = CompiledFilter::new(&f).unwrap();
+        let mut view = FilteredView::new();
+        while view.update(&compiled, &fx.index, &fx.reader, &fx.ctx, 1).unwrap() > 0 {}
+        assert_eq!(view.match_count(), 2);
+        assert_eq!(view.examined(), 7);
     }
 
     #[test]
