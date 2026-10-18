@@ -23,7 +23,7 @@ Multi-file merged timeline, OS file association, saving Filter results to a file
 - [x] 12b. Highlight Rules in the window (text color, remembered)
 - [x] 12d. Color theme (System, Light, Dark) from the Tab bar
 - [ ] 12c. Settings window
-- [ ] 13. Follow Tail UI
+- [x] 13. Follow Tail UI
 - [ ] 14. Detail panel
 - [ ] 15. Keyboard shortcuts
 - [ ] 16. Bookmarks (low priority)
@@ -88,8 +88,8 @@ Multi-file merged timeline, OS file association, saving Filter results to a file
 - 12d: color theme choice (System, Light, Dark) in the Tab bar, remembered in `state.toml`; 12c's settings window offers the same choice. Highlight palette colors have light and dark variants.
 
 ### 13. Follow Tail UI (ui)
-- Toggle, auto-pause when scrolling up, resume at the bottom or by button.
-- Rotation notice bar with a "Reload" button.
+- Toggle in the footer (off by default, per Tab, not remembered); auto-pause when scrolling up, resume at the bottom or with the floating "Resume Follow" button.
+- Rotation notice bar with a "Reload" button (built in ticket 9); a Rotation also turns Follow off.
 
 ### 14. Detail panel (ui)
 - Selected Entry in full: pretty-printed JSON for JSON lines, full text otherwise.

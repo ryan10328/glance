@@ -32,6 +32,10 @@ The workspace has two crates:
 
 Besides the built-in Level colors, the **Highlight** row under the Filter bar colors any text you choose, as you type. Pick a color for each rule; `*` and `?` are wildcards unless `.* Regex` is on. Only the matching text changes color, so Level colors stay readable. Rules are shared by every tab and remembered in `state.toml`; where two rules overlap, the upper one wins. Search matches get a background on top.
 
+## Follow Tail
+
+The footer's **Follow** button keeps the view at the end as new Entries arrive, like `tail -f`. Scrolling up pauses it; scroll back to the bottom or press **Resume Follow** to continue. It is off by default and applies to the current tab only.
+
 ## Search
 
 The Search bar sits under the Highlight row (`Cmd/Ctrl+F` jumps to it; `Esc` clears the query): matches are marked live and Enter / Shift+Enter step through them. **Find all** (`Cmd/Ctrl+Enter`) lists every match in a panel below, like Notepad++; click a result to jump to that Entry. The list is a snapshot, so press Find all again after changing the query.

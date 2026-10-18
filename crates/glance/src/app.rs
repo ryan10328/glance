@@ -17,7 +17,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::highlight_bar::{HighlightBar, HighlightBarEvent};
-use crate::tab_view::TabView;
+use crate::tab_view::{FollowState, TabView};
 
 const POLL_TICK: Duration = Duration::from_millis(500);
 /// Background Tabs are polled every this many ticks (about 2 s).
@@ -119,7 +119,9 @@ impl GlanceApp {
         }
         match LogFile::open(&path, format) {
             Ok(file) => {
-                self.tabs.push(TabView::new(file, self.config.clone(), self.highlighter.clone(), self.highlight_bar.clone(), window, cx));
+                let tab = TabView::new(file, self.config.clone(), self.highlighter.clone(), self.highlight_bar.clone(), window, cx);
+                self.watch(&tab, cx);
+                self.tabs.push(tab);
                 self.active = self.tabs.len() - 1;
                 self.message = None;
                 self.remember_recent(path);
@@ -148,6 +150,11 @@ impl GlanceApp {
         self.state.recent_files.insert(0, path);
         self.state.recent_files.truncate(MAX_RECENT);
         self.state_dirty = true;
+    }
+
+    /// Redraws the footer whenever a Tab changes (progress, Follow state).
+    fn watch(&self, tab: &Entity<TabView>, cx: &mut Context<Self>) {
+        cx.observe(tab, |_, _, cx| cx.notify()).detach();
     }
 
     fn close(&mut self, index: usize) {
@@ -213,7 +220,11 @@ impl GlanceApp {
             Format::JsonLines => Format::PlainText,
         };
         match LogFile::open(&path, Some(next)) {
-            Ok(file) => self.tabs[self.active] = TabView::new(file, self.config.clone(), self.highlighter.clone(), self.highlight_bar.clone(), window, cx),
+            Ok(file) => {
+                let tab = TabView::new(file, self.config.clone(), self.highlighter.clone(), self.highlight_bar.clone(), window, cx);
+                self.watch(&tab, cx);
+                self.tabs[self.active] = tab;
+            }
             Err(e) => self.message = Some(e.to_string()),
         }
     }
@@ -295,6 +306,8 @@ impl GlanceApp {
         let Some(tab) = self.tabs.get(self.active) else {
             return bar.child(self.message.clone().unwrap_or_default());
         };
+        let follow = tab.read(cx).follow_state();
+        let tab_entity = tab.clone();
         let tab = tab.read(cx);
         let (shown, total) = tab.counts();
         let (scanned, indexed) = (tab.file().index().read().unwrap().scanned(), tab.file().is_indexed());
@@ -318,6 +331,16 @@ impl GlanceApp {
             .children(indexing.is_none().then_some("indexed"))
             .children(message)
             .child(div().flex_1())
+            .child({
+                let (label, tooltip) = match follow {
+                    FollowState::Off => ("○ Follow", "Keep the view at the end as new Entries arrive"),
+                    FollowState::Following => ("● Following", "Stop following"),
+                    FollowState::Paused => ("⏸ Follow paused", "Paused because you scrolled up. Click to scroll to the bottom and follow again"),
+                };
+                let button = Button::new("follow").xsmall().label(label).tooltip(tooltip);
+                let button = if follow == FollowState::Following { button.primary() } else { button.ghost() };
+                button.on_click(cx.listener(move |_, _, _, cx| tab_entity.update(cx, |tab, cx| tab.toggle_follow(cx))))
+            })
             .children(progress.map(|(label, percent)| {
                 h_flex()
                     .gap_2()

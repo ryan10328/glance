@@ -56,6 +56,15 @@ struct Results {
     search: Search,
 }
 
+/// Follow Tail as the user sees it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FollowState {
+    Off,
+    Following,
+    /// Following is on but the user scrolled away from the bottom.
+    Paused,
+}
+
 pub struct TabView {
     file: LogFile,
     config: Rc<Config>,
@@ -96,6 +105,14 @@ pub struct TabView {
     /// The result the user last clicked.
     results_current: Option<usize>,
     split: Entity<ResizableState>,
+    follow: bool,
+    follow_paused: bool,
+    /// Rows at the last scroll to the bottom; `usize::MAX` forces a scroll.
+    follow_rows: usize,
+    /// Render count at that scroll, so a stale view is not mistaken for the user scrolling.
+    follow_render: usize,
+    /// (renders so far, end of the visible row range) as of the last Entry view render.
+    view_state: Rc<Cell<(usize, usize)>>,
 }
 
 /// `81799` becomes `81,799`.
@@ -202,6 +219,11 @@ impl TabView {
                 results_scroll: UniformListScrollHandle::new(),
                 results_current: None,
                 split: cx.new(|_| ResizableState::default()),
+                follow: false,
+                follow_paused: false,
+                follow_rows: usize::MAX,
+                follow_render: 0,
+                view_state: Rc::new(Cell::new((0, 0))),
             }
         })
     }
@@ -326,6 +348,7 @@ impl TabView {
 
     /// Advances background work a little. Returns whether there is more to do.
     fn work(&mut self, cx: &mut Context<Self>) -> bool {
+        self.work_follow(cx);
         let filtering = self.work_filter(cx);
         let searching = self.work_search(cx);
         filtering || searching
@@ -374,6 +397,71 @@ impl TabView {
             cx.notify();
         }
         more
+    }
+
+    // ---- Follow Tail ---------------------------------------------------------
+
+    pub fn follow_state(&self) -> FollowState {
+        match (self.follow, self.follow_paused) {
+            (false, _) => FollowState::Off,
+            (true, false) => FollowState::Following,
+            (true, true) => FollowState::Paused,
+        }
+    }
+
+    /// Off turns Following on, Following turns it off, Paused resumes it.
+    pub fn toggle_follow(&mut self, cx: &mut Context<Self>) {
+        match self.follow_state() {
+            FollowState::Off => {
+                self.follow = true;
+                self.resume_follow(cx);
+            }
+            FollowState::Following => {
+                self.follow = false;
+                self.follow_paused = false;
+            }
+            FollowState::Paused => self.resume_follow(cx),
+        }
+        cx.notify();
+    }
+
+    fn resume_follow(&mut self, cx: &mut Context<Self>) {
+        self.follow_paused = false;
+        self.follow_rows = usize::MAX;
+        cx.notify();
+    }
+
+    /// Keeps the view at the bottom while new Entries arrive, and pauses when the user scrolls up.
+    fn work_follow(&mut self, cx: &mut Context<Self>) {
+        if !self.follow {
+            return;
+        }
+        if self.file.rotated().is_some() {
+            self.follow = false;
+            self.follow_paused = false;
+            cx.notify();
+            return;
+        }
+        let rows = self.row_count();
+        let (renders, visible_end) = self.view_state.get();
+        let fresh = renders > self.follow_render;
+        if self.follow_paused {
+            if fresh && rows > 0 && visible_end >= rows {
+                self.follow_paused = false;
+                self.follow_rows = rows;
+                cx.notify();
+            }
+            return;
+        }
+        if fresh && self.follow_rows != usize::MAX && visible_end < self.follow_rows {
+            self.follow_paused = true;
+            cx.notify();
+        } else if rows != self.follow_rows {
+            self.follow_rows = rows;
+            self.follow_render = renders;
+            self.list_scroll.scroll_to_bottom();
+            cx.notify();
+        }
     }
 
     // ---- Search -------------------------------------------------------------
@@ -623,6 +711,7 @@ impl TabView {
         let selection = self.selection.clone();
         let scroll_x = self.scroll_x;
         let max_chars = self.max_chars.clone();
+        let view_state = self.view_state.clone();
         let list_scroll = self.list_scroll.clone();
         let family: SharedString = self.config.font_family.clone().unwrap_or_else(|| DEFAULT_FONT.to_owned()).into();
         let font_size = self.font_size();
@@ -639,6 +728,7 @@ impl TabView {
             count,
             cx.processor(move |this, range: std::ops::Range<usize>, _window, cx| {
                 let index = index.read().unwrap();
+                view_state.set((view_state.get().0 + 1, range.end));
                 range
                     .filter_map(|row| {
                         let view_row = match &this.filter {
@@ -720,6 +810,16 @@ impl TabView {
                 }
             }))
             .child(list)
+            .children((self.follow_state() == FollowState::Paused).then(|| {
+                div().absolute().right(px(24.)).bottom(px(12.)).child(
+                    Button::new("resume-follow")
+                        .small()
+                        .primary()
+                        .label("↓ Resume Follow")
+                        .tooltip("Scroll to the bottom and follow new Entries again")
+                        .on_click(cx.listener(|this, _, _, cx| this.resume_follow(cx))),
+                )
+            }))
             .child(
                 div().absolute().top_0().right_0().bottom_0().w(Scrollbar::width()).child(
                     Scrollbar::vertical(&list_scroll).mode(ScrollbarMode::Always).viewport_from_layout(),
