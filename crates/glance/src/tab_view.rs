@@ -7,7 +7,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use glance_core::entry;
-use glance_core::filter::{CompiledFilter, FilterContext, FilteredView, ViewRow, };
+use glance_core::filter::{CompiledFilter, FilterContext, FilteredView, TextPattern, ViewRow};
 use glance_core::format::{parse_entry, resolve_time_zone};
 use glance_core::highlight::{Highlighter, Rgb, palette_rgb};
 use glance_core::search::{AllEntries, Direction, Rows, Search, SearchQuery};
@@ -15,7 +15,8 @@ use glance_core::selection::Selection;
 use glance_core::session::{LogFile, Polled};
 use glance_core::settings::Config;
 use glance_core::watch::Rotation;
-use gpui_kit::component::button::Button;
+use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::resizable::{ResizableState, resizable_panel, v_resizable};
 use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
 use gpui_kit::component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -45,6 +46,16 @@ const DEFAULT_FONT: &str = "Consolas";
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 const DEFAULT_FONT: &str = "monospace";
 
+/// A frozen list of Search matches shown in the panel below the Entry view.
+struct Results {
+    /// The query as typed, for the header.
+    label: String,
+    /// Matching Entry numbers, ascending. Entries (not rows) so a later Filter change cannot shift them.
+    entries: Vec<usize>,
+    /// Finds the occurrences to color in each result.
+    search: Search,
+}
+
 pub struct TabView {
     file: LogFile,
     config: Rc<Config>,
@@ -70,7 +81,6 @@ pub struct TabView {
     generation: u64,
     message: Option<String>,
     search_bar: Entity<SearchBar>,
-    search_open: bool,
     /// The query as typed; kept so Search can restart when the rows change.
     search_query: Option<SearchQuery>,
     search: Option<Search>,
@@ -79,6 +89,26 @@ pub struct TabView {
     search_current: Option<usize>,
     /// Jump to the first match once one is found (after the query changed).
     search_autojump: bool,
+    /// "Find all" was requested; the list is taken once Search has covered every row.
+    find_pending: bool,
+    results: Option<Results>,
+    results_scroll: UniformListScrollHandle,
+    /// The result the user last clicked.
+    results_current: Option<usize>,
+    split: Entity<ResizableState>,
+}
+
+/// `81799` becomes `81,799`.
+fn group_digits(n: usize) -> String {
+    let digits = n.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
 }
 
 pub fn color_of([r, g, b]: Rgb) -> Hsla {
@@ -127,11 +157,11 @@ impl TabView {
             })
             .detach();
             let search_bar = cx.new(|cx| SearchBar::new(window, cx));
-            cx.subscribe_in(&search_bar, window, |this: &mut TabView, _, event: &SearchBarEvent, window, cx| match event {
+            cx.subscribe(&search_bar, |this: &mut TabView, _, event: &SearchBarEvent, cx| match event {
                 SearchBarEvent::Changed(query) => this.set_search_query(query.clone(), cx),
                 SearchBarEvent::Next => this.step_search(Direction::Forward, cx),
                 SearchBarEvent::Previous => this.step_search(Direction::Backward, cx),
-                SearchBarEvent::Close => this.close_search(window, cx),
+                SearchBarEvent::FindAll => this.find_all(cx),
             })
             .detach();
             cx.spawn(async move |this, cx| {
@@ -162,12 +192,16 @@ impl TabView {
                 pending_scroll: None,
                 selection_settled: true,
                 search_bar,
-                search_open: false,
                 search_query: None,
                 search: None,
                 search_invalid: false,
                 search_current: None,
                 search_autojump: false,
+                find_pending: false,
+                results: None,
+                results_scroll: UniformListScrollHandle::new(),
+                results_current: None,
+                split: cx.new(|_| ResizableState::default()),
             }
         })
     }
@@ -236,6 +270,8 @@ impl TabView {
 
     fn reset_after_reload(&mut self, _cx: &mut Context<Self>) {
         self.selection.clear();
+        self.results = None;
+        self.find_pending = false;
         self.scroll_x = 0.0;
         self.max_chars.set(0);
         if let Some((compiled, _)) = self.filter.take() {
@@ -343,13 +379,13 @@ impl TabView {
     // ---- Search -------------------------------------------------------------
 
     fn open_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.search_open = true;
         self.search_bar.update(cx, |bar, cx| bar.focus(window, cx));
         cx.notify();
     }
 
-    fn close_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.search_open = false;
+    /// Clears the query and returns to the Entry view; the Search bar itself stays.
+    fn cancel_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.search_bar.update(cx, |bar, cx| bar.clear(window, cx));
         self.search_query = None;
         self.search = None;
         self.search_invalid = false;
@@ -361,6 +397,7 @@ impl TabView {
 
     fn set_search_query(&mut self, query: SearchQuery, cx: &mut Context<Self>) {
         self.search_query = Some(query);
+        self.find_pending = false;
         self.start_search(true);
         self.work_search(cx);
         cx.notify();
@@ -408,6 +445,7 @@ impl TabView {
     /// Scans a little further. Returns whether there is more to do.
     fn work_search(&mut self, cx: &mut Context<Self>) -> bool {
         let Some(search) = &mut self.search else {
+            self.find_pending = false;
             self.publish_search_status(cx);
             return false;
         };
@@ -437,6 +475,10 @@ impl TabView {
             }
         }
         let grew = search.count() != before;
+        let caught_up = !more && search.scanned_rows() >= self.row_count();
+        if self.find_pending && caught_up {
+            self.finish_find_all();
+        }
         if self.search_autojump && (grew || !more) {
             self.step_search(Direction::Forward, cx);
         } else {
@@ -448,14 +490,57 @@ impl TabView {
         more
     }
 
+    /// Lists every match in the panel; waits for Search to cover all rows first.
+    fn find_all(&mut self, cx: &mut Context<Self>) {
+        if self.search.is_none() || self.search_query.as_ref().is_none_or(|q| q.pattern.is_empty()) {
+            return;
+        }
+        self.find_pending = true;
+        self.work_search(cx);
+        cx.notify();
+    }
+
+    fn finish_find_all(&mut self) {
+        let (Some(search), Some(query)) = (&self.search, &self.search_query) else { return };
+        let Ok(occurrences) = Search::new(query) else { return };
+        let entries = search.matches().filter_map(|row| self.row_at(row).map(|r| r.entry)).collect();
+        let label = match &query.pattern {
+            TextPattern::Wildcard(text) | TextPattern::Regex(text) => text.clone(),
+        };
+        self.results = Some(Results { label, entries, search: occurrences });
+        self.results_current = None;
+        self.find_pending = false;
+    }
+
+    /// Selects an Entry and scrolls the Entry view to it, e.g. after a click in the results panel.
+    fn jump_to_entry(&mut self, entry: usize, cx: &mut Context<Self>) {
+        let row = match &self.filter {
+            Some((_, view)) => view.row_of(entry),
+            None => Some(entry),
+        };
+        let Some(row) = row else {
+            self.message = Some("That Entry is hidden by the current Filter".to_owned());
+            cx.notify();
+            return;
+        };
+        self.message = None;
+        self.selection.click(entry);
+        if self.search.as_ref().is_some_and(|s| s.ordinal(row).is_some()) {
+            self.search_current = Some(row);
+            self.publish_search_status(cx);
+        }
+        self.list_scroll.scroll_to_item_strict(row, ScrollStrategy::Center);
+        cx.notify();
+    }
+
     fn publish_search_status(&mut self, cx: &mut Context<Self>) {
         let empty = self.search_query.as_ref().is_none_or(|q| q.pattern.is_empty());
         let (status, invalid) = match &self.search {
             _ if self.search_invalid => ("invalid regex".to_owned(), true),
             Some(search) if !empty => {
-                let ordinal = self.search_current.and_then(|r| search.ordinal(r)).map_or("–".to_owned(), |o| o.to_string());
+                let ordinal = self.search_current.and_then(|r| search.ordinal(r)).map_or("–".to_owned(), group_digits);
                 let more = if search.scanned_rows() < self.row_count() { "…" } else { "" };
-                (format!("{ordinal} / {}{more}", search.count()), false)
+                (format!("{ordinal} / {}{more}", group_digits(search.count())), false)
             }
             _ => (String::new(), false),
         };
@@ -643,13 +728,131 @@ impl TabView {
     }
 }
 
+impl TabView {
+    fn render_results(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let results = self.results.as_ref()?;
+        let count = results.entries.len();
+        let header = format!("Search results · \"{}\" · {} match{}", results.label, count, if count == 1 { "" } else { "es" });
+        let index = self.file.index().clone();
+        let reader = self.file.reader().clone();
+        let highlighter = self.highlighter.clone();
+        let palette = LevelPalette::new(cx);
+        let dark = cx.theme().is_dark();
+        let family: SharedString = self.config.font_family.clone().unwrap_or_else(|| DEFAULT_FONT.to_owned()).into();
+        let font_size = self.font_size();
+        let row_height = (font_size * 1.5).ceil();
+        let (muted, border, hover_bg, current_bg, found_bg, header_bg, body_bg, foreground) = {
+            let theme = cx.theme();
+            (
+                theme.muted_foreground,
+                theme.border,
+                theme.list_hover,
+                theme.accent,
+                theme.warning,
+                theme.secondary,
+                theme.muted.opacity(0.35),
+                theme.foreground,
+            )
+        };
+        let results_scroll = self.results_scroll.clone();
+        let list = uniform_list(
+            "results",
+            count,
+            cx.processor(move |this, range: Range<usize>, _window, cx| {
+                let Some(results) = &this.results else { return Vec::new() };
+                let index = index.read().unwrap();
+                range
+                    .filter_map(|i| {
+                        let entry_no = *results.entries.get(i)?;
+                        let text = entry::read_summary(&index, &reader, entry_no).ok().flatten().map(|s| s.first_line).unwrap_or_default();
+                        let level = parse_entry(this.ctx.format, this.ctx.rule, text.as_bytes(), &this.ctx.zone).level;
+                        let LevelStyle { tint, faded } = palette.style(level);
+                        let found = merge_highlights(
+                            &text,
+                            results.search.occurrences(text.as_bytes()),
+                            highlighter.text_spans(text.as_bytes()),
+                            dark,
+                            found_bg.opacity(0.55),
+                        );
+                        Some(
+                            h_flex()
+                                .id(("result", i))
+                                .h(px(row_height))
+                                .w_full()
+                                .flex_none()
+                                .cursor_pointer()
+                                .when_some(tint, |s, tint| s.bg(tint))
+                                .when(this.results_current == Some(i), |s| s.bg(current_bg))
+                                .hover(|s| s.bg(hover_bg))
+                                .child(div().w(px(GUTTER_WIDTH)).flex_none().pr_3().text_right().text_color(muted).child((entry_no + 1).to_string()))
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .h_full()
+                                        .overflow_hidden()
+                                        .whitespace_nowrap()
+                                        .when(faded, |s| s.text_color(muted))
+                                        .child(StyledText::new(text).with_highlights(found)),
+                                )
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(move |this, _: &MouseDownEvent, _, cx| {
+                                        this.results_current = Some(i);
+                                        this.jump_to_entry(entry_no, cx);
+                                    }),
+                                ),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            }),
+        )
+        .track_scroll(&results_scroll)
+        .size_full();
+        Some(
+            v_flex()
+                .size_full()
+                .bg(body_bg)
+                .border_t_2()
+                .border_color(border)
+                .child(
+                    h_flex()
+                        .px_3()
+                        .py_1()
+                        .gap_3()
+                        .items_center()
+                        .justify_between()
+                        .bg(header_bg)
+                        .border_b_1()
+                        .border_color(border)
+                        .text_color(foreground)
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(header)
+                        .child(Button::new("results-close").xsmall().ghost().label("×").tooltip("Close the results").on_click(cx.listener(
+                            |this, _, _, cx| {
+                                this.results = None;
+                                cx.notify();
+                            },
+                        ))),
+                )
+                .child(
+                    div().relative().flex_1().min_h_0().font_family(family).text_size(px(font_size)).child(list).child(
+                        div().absolute().top_0().right_0().bottom_0().w(Scrollbar::width()).child(
+                            Scrollbar::vertical(&results_scroll).mode(ScrollbarMode::Always).viewport_from_layout(),
+                        ),
+                    ),
+                )
+                .into_any_element(),
+        )
+    }
+}
+
 impl Render for TabView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let border = cx.theme().border;
         v_flex()
             .size_full()
             .on_action(cx.listener(|this, _: &OpenSearch, window, cx| this.open_search(window, cx)))
-            .on_action(cx.listener(|this, _: &CloseSearch, window, cx| this.close_search(window, cx)))
+            .on_action(cx.listener(|this, _: &CloseSearch, window, cx| this.cancel_search(window, cx)))
             .children(self.render_rotation_bar(cx))
             .child(
                 v_flex()
@@ -659,9 +862,39 @@ impl Render for TabView {
                     .border_b_1()
                     .border_color(border)
                     .child(self.filter_bar.clone())
-                    .children(self.search_open.then(|| self.search_bar.clone()))
-                    .child(self.highlight_bar.clone()),
+                    .child(self.highlight_bar.clone())
+                    .child(self.search_bar.clone()),
             )
-            .child(self.render_entry_view(cx))
+            .child({
+                let results = self.render_results(cx);
+                let entry_view = self.render_entry_view(cx);
+                match results {
+                Some(results) => div()
+                    .flex_1()
+                    .min_h_0()
+                    .child(
+                        v_resizable("results-split")
+                            .with_state(&self.split)
+                            .child(resizable_panel().child(v_flex().size_full().child(entry_view)))
+                            .child(resizable_panel().size(px(220.)).size_range(px(90.)..px(2000.)).child(results)),
+                    )
+                    .into_any_element(),
+                None => entry_view.into_any_element(),
+                }
+            })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::group_digits;
+
+    #[test]
+    fn digits_are_grouped_by_thousands() {
+        assert_eq!(group_digits(0), "0");
+        assert_eq!(group_digits(999), "999");
+        assert_eq!(group_digits(1000), "1,000");
+        assert_eq!(group_digits(81799), "81,799");
+        assert_eq!(group_digits(1234567), "1,234,567");
     }
 }

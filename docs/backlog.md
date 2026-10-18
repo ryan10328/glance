@@ -19,7 +19,7 @@ Multi-file merged timeline, OS file association, saving Filter results to a file
 - [x] 9. Window shell and Tabs
 - [x] 10. Virtualized Entry view
 - [x] 11. Filter and Search UI
-- [ ] 12a. Level coloring and Search occurrence highlighting
+- [x] 12a. Level coloring and Search occurrence highlighting
 - [x] 12b. Highlight Rules in the window (text color, remembered)
 - [x] 12d. Color theme (System, Light, Dark) from the Tab bar
 - [ ] 12c. Settings window
@@ -32,7 +32,7 @@ Multi-file merged timeline, OS file association, saving Filter results to a file
 
 ### 1. Settings paths and files (core)
 - Resolve the config directory with `directories::ProjectDirs::from("com", "ryan", "Glance")`; debug builds append `-dev`.
-- Load `config.toml` (user-edited preferences) and `state.toml` (program-written: window size, recent files, Highlight Rules) via `serde`; missing files fall back to defaults.
+- Load `config.toml` (user-edited preferences) and `state.toml` (program-written: window size, recent files, Highlight Rules, color theme) via `serde`; missing files fall back to defaults.
 - Tests: path resolution, defaults, malformed TOML does not crash.
 
 ### 2. Level normalization (core)
@@ -68,7 +68,7 @@ Multi-file merged timeline, OS file association, saving Filter results to a file
 - On Rotation: stop following and report; reload only when requested.
 
 ### 9. Window shell and Tabs (ui)
-- Layout: Tab bar, Filter bar, Search bar, Entry view, collapsible detail panel, status bar.
+- Layout: Tab bar, Filter bar, Highlight row, Search bar (always shown; Cmd/Ctrl+F focuses it), Entry view, collapsible detail panel, footer. The footer is the only place showing entry counts, with a progress bar on the right while indexing or filtering.
 - Open files via dialog, drag and drop, and a command-line argument.
 - Per-Tab state; background Tabs keep their index current, Filter and Search run only in the active Tab.
 
@@ -78,13 +78,13 @@ Multi-file merged timeline, OS file association, saving Filter results to a file
 
 ### 11. Filter and Search UI (ui)
 - Filter bar: Level checkboxes (with All and "WARN and above" presets), text conditions (wildcard or regex, case-sensitivity, exclude). Context N is the `filter_context` setting in `config.toml`, not a bar field. Field and time conditions were dropped by design.
-- Search bar: live search, next/previous, count, case-sensitivity and regex toggles.
+- Search bar: live search, next/previous, count, case-sensitivity and regex toggles, and "Find all" (Cmd/Ctrl+Enter) that lists every match in a resizable results panel below the Entry view (a frozen list; click a result to select it and scroll to it).
 - "Show Context" for a single Entry and jump to next ERROR-or-above moved to tickets 14 and 15.
 
 ### 12. Highlighting (ui + core), in three steps
 - 12a: built-in Level rules coloring the whole Entry; mark Search occurrences in the visible first line.
 - 12b: Highlight Rules typed in the window, applied live as text color on the matching text; shared by all Tabs, remembered in `state.toml`, first rule wins.
-- 12c: settings window editing `config.toml` (font, font size, time zone, Filter context); direct file edits are respected.
+- 12c: settings window editing `config.toml` (font, font size, time zone, Filter context); direct file edits are respected. `default_time_zone` is read but has no visible effect now that time conditions are gone; decide in 12c whether to keep it.
 - 12d: color theme choice (System, Light, Dark) in the Tab bar, remembered in `state.toml`; 12c's settings window offers the same choice. Highlight palette colors have light and dark variants.
 
 ### 13. Follow Tail UI (ui)

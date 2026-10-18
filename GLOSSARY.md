@@ -33,7 +33,7 @@ One open Log File in the window, with its own Filter, Search, Highlight state an
 _Avoid_: Document, session
 
 **Search**:
-Locating matching text while every Entry stays visible, with jumping between matches.
+Locating matching text while every Entry stays visible, with jumping between matches. "Find all" additionally lists every match in a results panel below the Entry view; clicking a result jumps to that Entry.
 _Avoid_: Find, query
 
 **Filter**:

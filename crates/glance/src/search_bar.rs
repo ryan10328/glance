@@ -12,7 +12,8 @@ pub enum SearchBarEvent {
     Changed(SearchQuery),
     Next,
     Previous,
-    Close,
+    /// List every match in the results panel.
+    FindAll,
 }
 
 impl EventEmitter<SearchBarEvent> for SearchBar {}
@@ -31,8 +32,12 @@ impl SearchBar {
         let input = cx.new(|cx| InputState::new(window, cx).placeholder("Search"));
         cx.subscribe_in(&input, window, |this, _, event: &InputEvent, _, cx| match event {
             InputEvent::Change => this.changed(cx),
-            InputEvent::PressEnter { shift, .. } => {
-                cx.emit(if *shift { SearchBarEvent::Previous } else { SearchBarEvent::Next });
+            InputEvent::PressEnter { shift, secondary } => {
+                cx.emit(match (*secondary, *shift) {
+                    (true, _) => SearchBarEvent::FindAll,
+                    (false, true) => SearchBarEvent::Previous,
+                    (false, false) => SearchBarEvent::Next,
+                });
             }
             _ => {}
         })
@@ -42,6 +47,11 @@ impl SearchBar {
 
     pub fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
         self.input.update(cx, |input, cx| input.focus(window, cx));
+    }
+
+    /// Empties the query box.
+    pub fn clear(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.input.update(cx, |input, cx| input.set_value("", window, cx));
     }
 
     pub fn query(&self, cx: &App) -> SearchQuery {
@@ -74,11 +84,17 @@ impl Render for SearchBar {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let (muted, danger) = (cx.theme().muted_foreground, cx.theme().danger);
         h_flex()
-            .gap_1()
+            .gap_2()
             .items_center()
+            .w_full()
             .key_context("SearchBar")
-            .child(div().w(px(48.)).text_color(muted).child("Search"))
-            .child(div().w(px(280.)).child(Input::new(&self.input).small()))
+            .child(
+                div().flex_1().min_w(px(120.)).child(
+                    Input::new(&self.input)
+                        .small()
+                        .suffix(div().pr_1().text_xs().text_color(if self.invalid { danger } else { muted }).child(self.status.clone())),
+                ),
+            )
             .child(flag("search-aa", "Aa Match case", "Case-sensitive matching", self.case_sensitive).on_click(cx.listener(|this, _, _, cx| {
                 this.case_sensitive ^= true;
                 this.changed(cx);
@@ -87,9 +103,8 @@ impl Render for SearchBar {
                 this.regex ^= true;
                 this.changed(cx);
             })))
-            .child(div().min_w(px(72.)).text_color(if self.invalid { danger } else { muted }).child(self.status.clone()))
             .child(Button::new("search-prev").xsmall().ghost().label("↑ Prev").tooltip("Previous match (Shift+Enter)").on_click(cx.listener(|_, _, _, cx| cx.emit(SearchBarEvent::Previous))))
             .child(Button::new("search-next").xsmall().ghost().label("↓ Next").tooltip("Next match (Enter)").on_click(cx.listener(|_, _, _, cx| cx.emit(SearchBarEvent::Next))))
-            .child(Button::new("search-close").xsmall().ghost().label("× Close").tooltip("Close (Esc)").on_click(cx.listener(|_, _, _, cx| cx.emit(SearchBarEvent::Close))))
+            .child(Button::new("search-all").xsmall().outline().label("Find all").tooltip("List every match in a panel below (Cmd/Ctrl+Enter)").on_click(cx.listener(|_, _, _, cx| cx.emit(SearchBarEvent::FindAll))))
     }
 }

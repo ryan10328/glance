@@ -30,7 +30,20 @@ The workspace has two crates:
 
 ## Highlight rules
 
-Besides the built-in Level colors, the **Highlight** row under the Filter and Search bars colors any text you choose, as you type. Pick a color for each rule; `*` and `?` are wildcards unless `.* Regex` is on. Only the matching text changes color, so Level colors stay readable. Rules are shared by every tab and remembered in `state.toml`; where two rules overlap, the upper one wins. Search matches get a background on top.
+Besides the built-in Level colors, the **Highlight** row under the Filter bar colors any text you choose, as you type. Pick a color for each rule; `*` and `?` are wildcards unless `.* Regex` is on. Only the matching text changes color, so Level colors stay readable. Rules are shared by every tab and remembered in `state.toml`; where two rules overlap, the upper one wins. Search matches get a background on top.
+
+## Search
+
+The Search bar sits under the Highlight row (`Cmd/Ctrl+F` jumps to it; `Esc` clears the query): matches are marked live and Enter / Shift+Enter step through them. **Find all** (`Cmd/Ctrl+Enter`) lists every match in a panel below, like Notepad++; click a result to jump to that Entry. The list is a snapshot, so press Find all again after changing the query.
+
+## Settings
+
+Two TOML files live in the per-user settings folder (debug builds use a separate `Glance-dev` folder):
+
+- `config.toml`, edited by you: `wrap_long_lines`, `font_family`, `font_size`, `default_time_zone` and `filter_context` (entries kept around each Filter match, 0 to 50; read when a file is opened). A settings window is planned.
+- `state.toml`, written by Glance: window size, recent files, Highlight rules and the color theme (System, Light or Dark, chosen from the Tab bar).
+
+The footer shows the entry count (`42 of 1000 entries` while a Filter is applied) and a progress bar while the file is indexed or filtered.
 
 ## License
 
