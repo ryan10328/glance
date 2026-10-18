@@ -86,6 +86,17 @@ pub struct WindowSize {
     pub height: u32,
 }
 
+/// Which color theme the window uses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ThemeChoice {
+    /// Follow the system appearance, also when it changes.
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
 /// Program-written state.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default)]
@@ -94,6 +105,7 @@ pub struct State {
     pub recent_files: Vec<PathBuf>,
     /// The Highlight Rules shown in the window, shared by every Tab.
     pub highlight_rules: Vec<HighlightRule>,
+    pub theme: ThemeChoice,
 }
 
 /// Loads a settings file. A missing file yields the defaults; a malformed one
@@ -163,6 +175,16 @@ mod tests {
         };
         save(&path, &state).unwrap();
         assert_eq!(load::<State>(&path).unwrap(), state);
+    }
+
+    #[test]
+    fn theme_defaults_to_system_and_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(STATE_FILE);
+        assert_eq!(load::<State>(&path).unwrap().theme, ThemeChoice::System);
+        save(&path, &State { theme: ThemeChoice::Dark, ..State::default() }).unwrap();
+        assert!(fs::read_to_string(&path).unwrap().contains("theme = \"dark\""));
+        assert_eq!(load::<State>(&path).unwrap().theme, ThemeChoice::Dark);
     }
 
     #[test]

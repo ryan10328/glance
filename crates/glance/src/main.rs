@@ -3,6 +3,7 @@ mod filter_bar;
 mod highlight_bar;
 mod level_style;
 mod search_bar;
+mod theme;
 mod tab_view;
 
 use std::path::PathBuf;
@@ -16,6 +17,7 @@ fn main() {
     let args: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
     gpui_kit::application().run(move |cx| {
         gpui_kit::init(cx);
+        theme::install_softer_dark(cx);
         let copy = if cfg!(target_os = "macos") { "cmd-c" } else { "ctrl-c" };
         let find = if cfg!(target_os = "macos") { "cmd-f" } else { "ctrl-f" };
         cx.bind_keys([

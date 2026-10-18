@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use glance_core::highlight::{Highlighter, PALETTE, Problem};
+use glance_core::highlight::{Highlighter, PALETTE, Problem, palette_rgb};
 use glance_core::settings::HighlightRule;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
@@ -92,6 +92,7 @@ fn flag(id: SharedString, label: &'static str, tooltip: &'static str, on: bool) 
 impl Render for HighlightBar {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let (muted, danger, ring) = (cx.theme().muted_foreground, cx.theme().danger, cx.theme().foreground);
+        let dark = cx.theme().is_dark();
         let count = self.rows.len();
         let add = |cx: &mut Context<Self>| {
             Button::new("add-highlight").xsmall().outline().label("+ Add highlight").tooltip("Color some text wherever it appears").on_click(
@@ -106,14 +107,14 @@ impl Render for HighlightBar {
                 let swatches: Vec<_> = PALETTE
                     .iter()
                     .enumerate()
-                    .map(|(c, (_, rgb))| {
+                    .map(|(c, _)| {
                         let selected = row.color == c;
                         div()
                             .id(("swatch", i * PALETTE.len() + c))
                             .size_4()
                             .rounded_full()
                             .cursor_pointer()
-                            .bg(color_of(*rgb))
+                            .bg(color_of(palette_rgb(c, dark)))
                             .border_2()
                             .border_color(if selected { ring } else { gpui_kit::transparent_black() })
                             .when(!selected, |s| s.opacity(0.7))

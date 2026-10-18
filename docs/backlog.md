@@ -21,6 +21,7 @@ Multi-file merged timeline, OS file association, saving Filter results to a file
 - [x] 11. Filter and Search UI
 - [ ] 12a. Level coloring and Search occurrence highlighting
 - [x] 12b. Highlight Rules in the window (text color, remembered)
+- [x] 12d. Color theme (System, Light, Dark) from the Tab bar
 - [ ] 12c. Settings window
 - [ ] 13. Follow Tail UI
 - [ ] 14. Detail panel
@@ -84,6 +85,7 @@ Multi-file merged timeline, OS file association, saving Filter results to a file
 - 12a: built-in Level rules coloring the whole Entry; mark Search occurrences in the visible first line.
 - 12b: Highlight Rules typed in the window, applied live as text color on the matching text; shared by all Tabs, remembered in `state.toml`, first rule wins.
 - 12c: settings window editing `config.toml` (font, font size, time zone); direct file edits are respected.
+- 12d: color theme choice (System, Light, Dark) in the Tab bar, remembered in `state.toml`; 12c's settings window offers the same choice. Highlight palette colors have light and dark variants.
 
 ### 13. Follow Tail UI (ui)
 - Toggle, auto-pause when scrolling up, resume at the bottom or by button.

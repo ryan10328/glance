@@ -2009,6 +2009,7 @@ dependencies = [
  "glance-core",
  "gpui-kit",
  "jiff",
+ "serde_json",
 ]
 
 [[package]]

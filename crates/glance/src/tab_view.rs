@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use glance_core::entry;
 use glance_core::filter::{CompiledFilter, FilterContext, FilteredView, ViewRow, };
 use glance_core::format::{parse_entry, resolve_time_zone};
-use glance_core::highlight::{Highlighter, Rgb};
+use glance_core::highlight::{Highlighter, Rgb, palette_rgb};
 use glance_core::search::{AllEntries, Direction, Rows, Search, SearchQuery};
 use glance_core::selection::Selection;
 use glance_core::session::{LogFile, Polled};
@@ -90,7 +90,8 @@ pub fn color_of([r, g, b]: Rgb) -> Hsla {
 fn merge_highlights(
     text: &str,
     search: Vec<Range<usize>>,
-    rules: Vec<(Range<usize>, Rgb)>,
+    rules: Vec<(Range<usize>, usize)>,
+    dark: bool,
     search_bg: Hsla,
 ) -> Vec<(Range<usize>, HighlightStyle)> {
     let on_boundary = |r: &Range<usize>| text.is_char_boundary(r.start) && text.is_char_boundary(r.end);
@@ -105,7 +106,7 @@ fn merge_highlights(
         .filter_map(|w| {
             let (a, b) = (w[0], w[1]);
             let background = search.iter().any(|r| covers(r, a, b));
-            let color = rules.iter().find(|(r, _)| covers(r, a, b)).map(|(_, c)| color_of(*c));
+            let color = rules.iter().find(|(r, _)| covers(r, a, b)).map(|(_, c)| color_of(palette_rgb(*c, dark)));
             (background || color.is_some()).then(|| {
                 (a..b, HighlightStyle { background_color: background.then_some(search_bg), color, ..Default::default() })
             })
@@ -549,6 +550,7 @@ impl TabView {
         let font_size = self.font_size();
         let row_height = (font_size * 1.5).ceil();
         let palette = LevelPalette::new(cx);
+        let dark = cx.theme().is_dark();
         let highlighter = self.highlighter.clone();
         let (muted, selected_bg, hover_bg, current_bg, found_bg) = {
             let theme = cx.theme();
@@ -574,7 +576,7 @@ impl TabView {
                         let LevelStyle { tint, faded } = palette.style(level);
                         // Search matches get a background; the user's Highlight Rules color the text.
                         let search_ranges = this.search.as_ref().map(|s| s.occurrences(text.as_bytes())).unwrap_or_default();
-                        let found = merge_highlights(&text, search_ranges, highlighter.text_spans(text.as_bytes()), found_bg.opacity(0.55));
+                        let found = merge_highlights(&text, search_ranges, highlighter.text_spans(text.as_bytes()), dark, found_bg.opacity(0.55));
                         let badge = (extra > 0).then(|| format!("  [+{extra}{} lines]", if more { "+" } else { "" }));
                         Some(
                             h_flex()

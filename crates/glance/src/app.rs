@@ -7,10 +7,11 @@ use std::time::Duration;
 use glance_core::format::Format;
 use glance_core::highlight::Highlighter;
 use glance_core::session::{LogFile, Polled};
-use glance_core::settings::{self, Config, State, WindowSize};
+use glance_core::settings::{self, Config, State, ThemeChoice, WindowSize};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::tab::{Tab, TabBar};
-use gpui_kit::component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
+use gpui_kit::component::{ActiveTheme as _, Sizable as _, Theme, ThemeMode, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -64,6 +65,17 @@ impl GlanceApp {
         })
         .detach();
         let highlighter = Rc::new(Highlighter::new(&state.highlight_rules).0);
+        // In System mode the window follows the system appearance as it changes.
+        let this = cx.entity();
+        window
+            .observe_window_appearance(move |window, cx| {
+                this.update(cx, |app, cx| {
+                    if app.state.theme == ThemeChoice::System {
+                        app.apply_theme(window, cx);
+                    }
+                });
+            })
+            .detach();
         let mut app = Self {
             tabs: Vec::new(),
             active: 0,
@@ -75,6 +87,7 @@ impl GlanceApp {
             message,
             tick: 0,
         };
+        app.apply_theme(window, cx);
         for path in args {
             app.open(&path, None, window, cx);
         }
@@ -112,6 +125,21 @@ impl GlanceApp {
             }
             Err(e) => self.message = Some(format!("Cannot open {}: {e}", path.display())),
         }
+    }
+
+    fn apply_theme(&self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.state.theme {
+            ThemeChoice::System => Theme::sync_system_appearance(Some(window), cx),
+            ThemeChoice::Light => Theme::change(ThemeMode::Light, Some(window), cx),
+            ThemeChoice::Dark => Theme::change(ThemeMode::Dark, Some(window), cx),
+        }
+    }
+
+    fn set_theme(&mut self, theme: ThemeChoice, window: &mut Window, cx: &mut Context<Self>) {
+        self.state.theme = theme;
+        self.state_dirty = true;
+        self.apply_theme(window, cx);
+        cx.notify();
     }
 
     fn remember_recent(&mut self, path: PathBuf) {
@@ -240,6 +268,26 @@ impl GlanceApp {
             })
     }
 
+    fn render_theme_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let current = self.state.theme;
+        let label = match current {
+            ThemeChoice::System => "◐ System",
+            ThemeChoice::Light => "☀ Light",
+            ThemeChoice::Dark => "☾ Dark",
+        };
+        let app = cx.entity();
+        Button::new("theme").ghost().small().label(format!("{label} ▾")).tooltip("Color theme").dropdown_menu(move |menu, _, _| {
+            [("System", ThemeChoice::System), ("Light", ThemeChoice::Light), ("Dark", ThemeChoice::Dark)]
+                .into_iter()
+                .fold(menu, |menu, (name, choice)| {
+                    let app = app.clone();
+                    menu.item(PopupMenuItem::new(name).checked(current == choice).on_click(move |_, window, cx| {
+                        app.update(cx, |app, cx| app.set_theme(choice, window, cx));
+                    }))
+                })
+        })
+    }
+
     fn render_status_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         let bar = h_flex().px_3().py_1().gap_4().border_t_1().border_color(theme.border).text_sm().text_color(theme.muted_foreground);
@@ -294,7 +342,12 @@ impl Render for GlanceApp {
                 cx.notify();
             }))
             .children(tabs)
-            .suffix(Button::new("add").ghost().small().label("+").on_click(cx.listener(|this, _, window, cx| this.prompt_open(window, cx))));
+            .suffix(
+                h_flex()
+                    .gap_1()
+                    .child(Button::new("add").ghost().small().label("+").on_click(cx.listener(|this, _, window, cx| this.prompt_open(window, cx))))
+                    .child(self.render_theme_menu(cx)),
+            );
         let body = if self.tabs.is_empty() {
             self.render_welcome(cx).into_any_element()
         } else {

@@ -15,21 +15,31 @@ use crate::settings::HighlightRule;
 /// A color as red, green, blue.
 pub type Rgb = [u8; 3];
 
-/// The colors a rule can pick from: name and value.
-pub const PALETTE: [(&str, Rgb); 8] = [
-    ("Red", [0xef, 0x44, 0x44]),
-    ("Orange", [0xf9, 0x73, 0x16]),
-    ("Yellow", [0xca, 0x8a, 0x04]),
-    ("Green", [0x22, 0xc5, 0x5e]),
-    ("Cyan", [0x06, 0xb6, 0xd4]),
-    ("Blue", [0x3b, 0x82, 0xf6]),
-    ("Purple", [0xa8, 0x55, 0xf7]),
-    ("Pink", [0xec, 0x48, 0x99]),
+/// A palette color: name, value on a light background, value on a dark one.
+pub type PaletteColor = (&'static str, Rgb, Rgb);
+
+/// The colors a rule can pick from.
+pub const PALETTE: [PaletteColor; 8] = [
+    ("Red", [0xdc, 0x26, 0x26], [0xf8, 0x71, 0x71]),
+    ("Orange", [0xea, 0x58, 0x0c], [0xfb, 0x92, 0x3c]),
+    ("Yellow", [0xca, 0x8a, 0x04], [0xfa, 0xcc, 0x15]),
+    ("Green", [0x16, 0xa3, 0x4a], [0x4a, 0xde, 0x80]),
+    ("Cyan", [0x08, 0x91, 0xb2], [0x22, 0xd3, 0xee]),
+    ("Blue", [0x25, 0x63, 0xeb], [0x60, 0xa5, 0xfa]),
+    ("Purple", [0x93, 0x33, 0xea], [0xc0, 0x84, 0xfc]),
+    ("Pink", [0xdb, 0x27, 0x77], [0xf4, 0x72, 0xb6]),
 ];
+
+/// The color to draw palette entry `index` in.
+pub fn palette_rgb(index: usize, dark: bool) -> Rgb {
+    let (_, light, dark_rgb) = PALETTE[index.min(PALETTE.len() - 1)];
+    if dark { dark_rgb } else { light }
+}
 
 struct CompiledRule {
     regex: Regex,
-    color: Rgb,
+    /// Index into [`PALETTE`].
+    color: usize,
 }
 
 #[derive(Default)]
@@ -53,7 +63,7 @@ impl Highlighter {
             }
             let pattern = if rule.regex { TextPattern::Regex(rule.pattern.clone()) } else { TextPattern::Wildcard(rule.pattern.clone()) };
             match build_regex(&pattern.to_regex_source(), rule.case_sensitive) {
-                Ok(regex) => compiled.push(CompiledRule { regex, color: PALETTE[rule.color.min(PALETTE.len() - 1)].1 }),
+                Ok(regex) => compiled.push(CompiledRule { regex, color: rule.color.min(PALETTE.len() - 1) }),
                 Err(e) => problems.push((i, e.to_string())),
             }
         }
@@ -64,10 +74,10 @@ impl Highlighter {
         self.rules.is_empty()
     }
 
-    /// Matches in `line`, ascending and not overlapping. Where two rules
-    /// overlap the earlier rule keeps the text.
-    pub fn text_spans(&self, line: &[u8]) -> Vec<(Range<usize>, Rgb)> {
-        let mut spans: Vec<(Range<usize>, Rgb)> = Vec::new();
+    /// Matches in `line` with their palette index, ascending and not
+    /// overlapping. Where two rules overlap the earlier rule keeps the text.
+    pub fn text_spans(&self, line: &[u8]) -> Vec<(Range<usize>, usize)> {
+        let mut spans: Vec<(Range<usize>, usize)> = Vec::new();
         for rule in &self.rules {
             for m in rule.regex.find_iter(line).filter(|m| !m.is_empty()) {
                 let range = m.range();
@@ -95,7 +105,7 @@ mod tests {
         let (h, problems) = Highlighter::new(&rules);
         assert_eq!(problems.len(), 1);
         assert_eq!(problems[0].0, 1);
-        assert_eq!(h.text_spans(b"it is ok"), vec![(6..8, PALETTE[1].1)]);
+        assert_eq!(h.text_spans(b"it is ok"), vec![(6..8, 1)]);
     }
 
     #[test]
@@ -112,19 +122,28 @@ mod tests {
     fn wildcards_and_regexes_both_work() {
         let (h, _) = Highlighter::new(&[rule("slow*query", false, 0), rule(r"user_\d+", true, 5)]);
         let spans = h.text_spans(b"user_7 ran a slow big query");
-        assert_eq!(spans, vec![(0..6, PALETTE[5].1), (13..27, PALETTE[0].1)]);
+        assert_eq!(spans, vec![(0..6, 5), (13..27, 0)]);
     }
 
     #[test]
     fn spans_do_not_overlap_and_earlier_rules_win() {
         let (h, _) = Highlighter::new(&[rule("slow query", false, 0), rule("query", false, 3), rule("user_\\d+", true, 5)]);
         let spans = h.text_spans(b"user_7 ran a slow query, then another query");
-        assert_eq!(spans, vec![(0..6, PALETTE[5].1), (13..23, PALETTE[0].1), (38..43, PALETTE[3].1)]);
+        assert_eq!(spans, vec![(0..6, 5), (13..23, 0), (38..43, 3)]);
     }
 
     #[test]
     fn an_out_of_range_color_falls_back_to_the_last_one() {
         let (h, _) = Highlighter::new(&[rule("x", false, 99)]);
-        assert_eq!(h.text_spans(b"x")[0].1, PALETTE[7].1);
+        assert_eq!(h.text_spans(b"x")[0].1, 7);
+    }
+
+    #[test]
+    fn every_palette_color_has_a_light_and_a_dark_variant() {
+        for (i, (name, light, dark)) in PALETTE.iter().enumerate() {
+            assert_ne!(light, dark, "{name}");
+            assert_eq!(palette_rgb(i, false), *light);
+            assert_eq!(palette_rgb(i, true), *dark);
+        }
     }
 }

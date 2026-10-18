@@ -10,6 +10,7 @@ pub struct LevelPalette {
     warn: Hsla,
     danger: Hsla,
     muted: Hsla,
+    dark: bool,
 }
 
 pub struct LevelStyle {
@@ -22,7 +23,7 @@ pub struct LevelStyle {
 impl LevelPalette {
     pub fn new(cx: &App) -> Self {
         let theme = cx.theme();
-        Self { warn: theme.warning, danger: theme.danger, muted: theme.muted_foreground }
+        Self { warn: theme.warning, danger: theme.danger, muted: theme.muted_foreground, dark: theme.is_dark() }
     }
 
     pub fn muted(&self) -> Hsla {
@@ -30,10 +31,12 @@ impl LevelPalette {
     }
 
     pub fn style(&self, level: Option<Level>) -> LevelStyle {
+        // On a dark background the same tint reads weaker, so it is stronger there.
+        let (mild, strong) = if self.dark { (0.26, 0.46) } else { (0.16, 0.32) };
         let tint = match level {
-            Some(Level::Warn) => Some(self.warn.opacity(0.16)),
-            Some(Level::Error) => Some(self.danger.opacity(0.16)),
-            Some(Level::Fatal) => Some(self.danger.opacity(0.32)),
+            Some(Level::Warn) => Some(self.warn.opacity(mild)),
+            Some(Level::Error) => Some(self.danger.opacity(mild)),
+            Some(Level::Fatal) => Some(self.danger.opacity(strong)),
             _ => None,
         };
         LevelStyle { tint, faded: matches!(level, Some(Level::Trace | Level::Debug)) }
