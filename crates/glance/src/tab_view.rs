@@ -198,11 +198,8 @@ impl TabView {
         let top_entry = self.row_at(top_row).map(|r| r.entry);
         if *filter == glance_core::filter::Filter::default() {
             self.filter = None;
-            self.filter_bar.update(cx, |bar, cx| {
-                bar.set_error(None, cx);
-                // `work` only reports on an active Filter, so clear the old numbers here.
-                bar.set_summary(String::new(), cx);
-            });
+            self.filter_bar.update(cx, |bar, cx| bar.set_error(None, cx));
+            self.publish_unfiltered_summary(cx);
             self.pending_scroll = None;
             if let Some(entry) = top_entry {
                 self.list_scroll.scroll_to_item_strict(entry, ScrollStrategy::Top);
@@ -236,6 +233,12 @@ impl TabView {
         }
     }
 
+    /// Without a Filter every Entry is shown, and the total keeps growing while the file is indexed.
+    fn publish_unfiltered_summary(&mut self, cx: &mut Context<Self>) {
+        let total = self.file.index().read().unwrap().len();
+        self.filter_bar.update(cx, |bar, cx| bar.set_summary(format!("{total} of {total} entries"), cx));
+    }
+
     /// Advances background work a little. Returns whether there is more to do.
     fn work(&mut self, cx: &mut Context<Self>) -> bool {
         let filtering = self.work_filter(cx);
@@ -244,7 +247,10 @@ impl TabView {
     }
 
     fn work_filter(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some((compiled, view)) = &mut self.filter else { return false };
+        let Some((compiled, view)) = &mut self.filter else {
+            self.publish_unfiltered_summary(cx);
+            return false;
+        };
         let started = Instant::now();
         let before = view.len();
         let mut more = false;
