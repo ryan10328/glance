@@ -203,6 +203,22 @@ impl GlanceApp {
         }
     }
 
+    /// A recent file no longer exists: offer to drop it from the list.
+    fn ask_forget_recent(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        let detail = format!("{}\nno longer exists. Remove it from the recent files?", path.display());
+        let answer = window.prompt(PromptLevel::Warning, "File not found", Some(&detail), &["Remove", "Keep"], cx);
+        cx.spawn(async move |this, cx| {
+            if answer.await == Ok(0) {
+                let _ = this.update(cx, |this, cx| {
+                    this.state.recent_files.retain(|p| *p != path);
+                    this.state_dirty = true;
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+    }
+
     fn remember_recent(&mut self, path: PathBuf) {
         self.state.recent_files.retain(|p| *p != path);
         self.state.recent_files.insert(0, path);
@@ -309,7 +325,11 @@ impl GlanceApp {
                     .child(name)
                     .child(div().text_color(theme.muted_foreground).child(dir))
                     .on_click(cx.listener(move |this, _, window, cx| {
-                        this.open(&target, None, window, cx);
+                        if matches!(std::fs::metadata(&target), Err(e) if e.kind() == std::io::ErrorKind::NotFound) {
+                            this.ask_forget_recent(target.clone(), window, cx);
+                        } else {
+                            this.open(&target, None, window, cx);
+                        }
                         cx.notify();
                     }))
             })
