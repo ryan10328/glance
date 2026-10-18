@@ -27,6 +27,7 @@ Multi-file merged timeline, OS file association, saving Filter results to a file
 - [ ] 14. Detail panel
 - [ ] 15. Keyboard shortcuts
 - [ ] 16. Bookmarks (low priority)
+- [ ] 17. Third-party license notices (before the first binary release)
 
 ## Tickets
 
@@ -103,3 +104,9 @@ Multi-file merged timeline, OS file association, saving Filter results to a file
 
 ### 16. Bookmarks (low priority)
 - Mark an Entry, jump between Bookmarks. Persistence per file to be decided when this is built.
+
+### 17. Third-party license notices (before the first binary release)
+- Source-only releases need nothing; a binary release must ship the licenses of what it contains. gpui-kit and GPUI are Apache-2.0, its bundled icons come from Lucide (ISC, with a Feather MIT notice), and a few dependencies are MPL-2.0 (`dwrote`, `option-ext`; unmodified, so only the source has to stay obtainable).
+- Generate `THIRD-PARTY-NOTICES` with `cargo-about` and ship it with the binaries.
+- Add `cargo-deny` with an allow-list of licenses so a copyleft dependency (GPL and the like) cannot slip in unnoticed. Dual-licensed crates such as `r-efi` and `self_cell` are fine through their permissive option.
+- Neither tool is installed yet; ask before installing.
