@@ -4,6 +4,8 @@ A fast desktop log viewer built with Rust and [GPUI](https://www.gpui.rs/) via [
 
 > **Status:** early development. There is no usable release yet.
 
+> **Built entirely with AI.** Every line of code and documentation in this project was written by an AI assistant ([Claude Code](https://claude.com/claude-code)). The human maintainer only describes what is wanted and checks that the features work; the code itself has not been reviewed line by line.
+
 ## Goals
 
 - Open local log files of several gigabytes without loading them into memory.
@@ -48,6 +50,14 @@ Two TOML files live in the per-user settings folder (debug builds use a separate
 - `state.toml`, written by Glance: window size, recent files, Highlight rules and the color theme (System, Light or Dark, chosen from the Tab bar).
 
 The footer shows the entry count (`42 of 1000 entries` while a Filter is applied) and a progress bar while the file is indexed or filtered.
+
+## Contributing
+
+Contributions are welcome, whether they are bug reports, ideas, documentation or code. Pull requests written with or without AI help are both fine. Please:
+
+- check [`docs/backlog.md`](docs/backlog.md) and [`GLOSSARY.md`](GLOSSARY.md) first, and use the glossary's terms;
+- keep `cargo clippy --workspace --all-targets` and `cargo test --workspace` clean;
+- use [Conventional Commits](https://www.conventionalcommits.org/) in English for commit messages.
 
 ## License
 
