@@ -25,7 +25,7 @@ Multi-file merged timeline, OS file association, saving Filter results to a file
 - [x] 12c. Settings window
 - [x] 13. Follow Tail UI
 - [x] 14a. Detail panel: full Entry, Copy entry, Search marks
-- [ ] 18. UI polish from the design critique (planned before 14b; order inside it is decided one by one)
+- [x] 18. UI polish from the design critique (18a to 18g)
 - [ ] 14b. Detail panel: copy a field value, Show Context
 - [ ] 15. Keyboard shortcuts
 - [ ] 16. Bookmarks (low priority)
@@ -117,7 +117,7 @@ Source: a design review of screenshots on 2026-10-20 (Operate mode; rough Nielse
 - 18b. (done: Apply and Clear all on the Level row, Level chips instead of checkboxes, an All | WARN+ segmented control, small aligned labels) Tighten the toolbar (about 230 px and four rows today): keep `Apply` / `Clear all` from wrapping onto their own line; give the row labels (`Level`, `Text`, `Highlight`) the same small size as the controls instead of larger; consider Level chips that toggle directly (no checkboxes) and `All | WARN+` as one segmented control.
 - 18c. (done: stripe 3 px, FATAL 4 px, tint 15%/28% light and 13%/26% dark) Row color in the Entry view: replace the heavy full-row WARN tint (olive in the dark theme) with a 3 px severity stripe plus a faint tint, and keep the stripe when a row is selected (selection currently hides the Level color).
 - 18d. (done: blue fill and edge when on, an outline when off; Apply turns solid with a dot while typed text is unapplied) One on/off style for every toggle (`Aa`, `.*`, `¬`, `All`, `WARN+`); show an "unapplied" hint when the Filter inputs changed but `Apply` was not pressed.
-- 18e. Detail panel: move `Copy entry` into the header next to `×`; show time and size in the header; avoid breaking lines in the middle of a token such as `path=/api/orders`; make the resize edge discoverable.
-- 18f. Small fixes: the Settings `Context` hint is clipped; thousands separators in the Search results header (`61,108`, as in the Search bar); the footer `plain text ▾` looks like a menu but toggles the Format; tooltips overlapping the Level row; make the Follow button more visible.
+- 18e. (done: Copy in the header, time and size in the header, wrapping only between words, a clearer resize edge) Detail panel: move `Copy entry` into the header next to `×`; show time and size in the header; avoid breaking lines in the middle of a token such as `path=/api/orders`; make the resize edge discoverable.
+- 18f. (done except tooltip placement, left as is: a tooltip has to cover the row above or below) Small fixes: the Settings `Context` hint is clipped; thousands separators in the Search results header (`61,108`, as in the Search bar); the footer `plain text ▾` looks like a menu but toggles the Format; tooltips overlapping the Level row; make the Follow button more visible.
 - 18g. (done) Selection style: a selected row is blue (no Level uses blue) with a 1 px edge line where the selection starts and ends, and keeps its Level stripe; the row Search is on shows a `▸` marker and a faint edge line instead of a background. Row painting must not take a second read lock on the Entry index (a nested read can deadlock against the indexing thread).
 - Still open after this ticket, in order: 14b, 15 (keyboard shortcuts), 16 (Bookmarks), 17 (license notices).

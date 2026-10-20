@@ -132,6 +132,45 @@ pub struct TabView {
     field_counts: RefCell<HashMap<usize, Option<usize>>>,
 }
 
+/// Longest word kept whole when wrapping; longer ones may break anywhere.
+const WORD_KEEP: usize = 80;
+
+/// Splits a line after each run of spaces so a wrapped line breaks only
+/// between words. Leading spaces stay with the first word; the ranges
+/// cover the whole line.
+fn word_ranges(line: &str) -> Vec<Range<usize>> {
+    let bytes = line.as_bytes();
+    let mut out = Vec::new();
+    let (mut start, mut i) = (0, 0);
+    while i < bytes.len() && bytes[i] == b' ' {
+        i += 1;
+    }
+    while i < bytes.len() {
+        while i < bytes.len() && bytes[i] != b' ' {
+            i += 1;
+        }
+        while i < bytes.len() && bytes[i] == b' ' {
+            i += 1;
+        }
+        out.push(start..i);
+        start = i;
+    }
+    if out.is_empty() && !line.is_empty() {
+        out.push(0..line.len());
+    }
+    out
+}
+
+/// The parts of `all` inside `segment`, moved so offsets start at the segment.
+fn clip_highlights(all: &[(Range<usize>, HighlightStyle)], segment: &Range<usize>) -> Vec<(Range<usize>, HighlightStyle)> {
+    all.iter()
+        .filter_map(|(range, style)| {
+            let (a, b) = (range.start.max(segment.start), range.end.min(segment.end));
+            (a < b).then(|| (a - segment.start..b - segment.start, *style))
+        })
+        .collect()
+}
+
 /// `81799` becomes `81,799`.
 fn group_digits(n: usize) -> String {
     let digits = n.to_string();
@@ -972,22 +1011,43 @@ impl TabView {
             .map(|(i, line)| {
                 let search = self.search.as_ref().map(|s| s.occurrences(line.as_bytes())).unwrap_or_default();
                 let found = merge_highlights(line, search, self.highlighter.text_spans(line.as_bytes()), dark, found_bg.opacity(0.55));
-                div()
-                    .id(("detail-line", i))
-                    .min_h(px(line_height))
-                    .when(wrap, |d| d.whitespace_normal())
-                    .when(!wrap, |d| d.whitespace_nowrap())
-                    .child(StyledText::new(line.to_owned()).with_highlights(found))
-                    .into_any_element()
+                if wrap {
+                    // Each word is its own unbreakable piece in a wrapping row, so lines break between words only.
+                    let pieces = word_ranges(line).into_iter().map(|seg| {
+                        let word = &line[seg.clone()];
+                        let long = word.trim_end_matches(' ').chars().count() > WORD_KEEP;
+                        div()
+                            .when(!long, |d| d.flex_none().whitespace_nowrap())
+                            .when(long, |d| d.min_w_0().max_w_full())
+                            .child(StyledText::new(word.to_owned()).with_highlights(clip_highlights(&found, &seg)))
+                    });
+                    h_flex().id(("detail-line", i)).flex_wrap().w_full().items_start().min_h(px(line_height)).children(pieces).into_any_element()
+                } else {
+                    div()
+                        .id(("detail-line", i))
+                        .min_h(px(line_height))
+                        .whitespace_nowrap()
+                        .child(StyledText::new(line.to_owned()).with_highlights(found))
+                        .into_any_element()
+                }
             })
             .collect();
         let selected = self.selection.len();
         let copy_label = match (self.copied, selected > 1) {
-            (Some(n), true) => format!("✓ Copied {n} entries"),
+            (Some(n), true) => format!("✓ Copied {n}"),
             (Some(_), false) => "✓ Copied".to_owned(),
-            (None, true) => format!("Copy {selected} entries"),
-            (None, false) => "Copy entry".to_owned(),
+            (None, true) => format!("Copy {selected}"),
+            (None, false) => "Copy".to_owned(),
         };
+        // Time and size describe one Entry, so they are left out of a multi-selection.
+        let facts = (selected <= 1).then(|| {
+            let size = entry::human_size(detail.size);
+            match entry::time_of_day(&detail.text) {
+                Some(time) => format!("{time} · {size}"),
+                None => size,
+            }
+        });
+        let edge = cx.theme().foreground.opacity(0.22);
         let danger = cx.theme().danger;
         let notes = [
             (total_lines > DETAIL_MAX_LINES).then(|| format!("… {} more lines not shown", total_lines - DETAIL_MAX_LINES)),
@@ -997,7 +1057,7 @@ impl TabView {
             v_flex()
                 .size_full()
                 .border_l_2()
-                .border_color(border)
+                .border_color(edge)
                 .child(
                     h_flex()
                         .px_3()
@@ -1010,12 +1070,22 @@ impl TabView {
                         .border_color(border)
                         .child(
                             h_flex()
+                                .flex_1()
+                                .min_w_0()
+                                .overflow_hidden()
                                 .gap_2()
                                 .items_center()
+                                .whitespace_nowrap()
                                 .child(div().font_weight(FontWeight::SEMIBOLD).child(format!("Entry {}", entry + 1)))
                                 .child(div().px_1().rounded(px(3.)).when_some(tint, |s, tint| s.bg(tint)).child(level_label))
-                                .children((selected > 1).then(|| div().text_color(muted).child(format!("{selected} selected")))),
+                                .children((selected > 1).then(|| div().text_color(muted).child(format!("{selected} selected"))))
+                                .children(facts.map(|f| div().text_sm().text_color(muted).child(f))),
                         )
+                        .child({
+                            let button = Button::new("detail-copy").xsmall().label(copy_label).tooltip("Copy the selected Entries (Cmd/Ctrl+C)");
+                            let button = if self.copied.is_some() { button.primary() } else { button.outline() };
+                            button.on_click(cx.listener(|this, _, _, cx| this.copy_selection(cx)))
+                        })
                         .child(Button::new("detail-close").xsmall().ghost().label("×").tooltip("Close the detail panel").on_click(cx.listener(
                             |this, _, _, cx| {
                                 this.detail_hidden = true;
@@ -1023,6 +1093,7 @@ impl TabView {
                             },
                         ))),
                 )
+                .children(self.copy_error.clone().map(|e| div().px_3().py_1().text_sm().text_color(danger).child(e)))
                 .child(
                     div()
                         .relative()
@@ -1061,21 +1132,6 @@ impl TabView {
                             ),
                         ),
                 )
-                .child(
-                    h_flex()
-                        .px_3()
-                        .py_1()
-                        .gap_2()
-                        .items_center()
-                        .border_t_1()
-                        .border_color(border)
-                        .child({
-                            let button = Button::new("detail-copy").xsmall().label(copy_label).tooltip("Copy the selected Entries (Cmd/Ctrl+C)");
-                            let button = if self.copied.is_some() { button.primary() } else { button.outline() };
-                            button.on_click(cx.listener(|this, _, _, cx| this.copy_selection(cx)))
-                        })
-                        .children(self.copy_error.clone().map(|e| div().text_color(danger).text_sm().child(e))),
-                )
                 .into_any_element(),
         )
     }
@@ -1083,7 +1139,7 @@ impl TabView {
     fn render_results(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let results = self.results.as_ref()?;
         let count = results.entries.len();
-        let header = format!("Search results · \"{}\" · {} match{}", results.label, count, if count == 1 { "" } else { "es" });
+        let header = format!("Search results · \"{}\" · {} match{}", results.label, group_digits(count), if count == 1 { "" } else { "es" });
         let index = self.file.index().clone();
         let reader = self.file.reader().clone();
         let highlighter = self.highlighter.clone();
@@ -1166,7 +1222,7 @@ impl TabView {
                 .size_full()
                 .bg(body_bg)
                 .border_t_2()
-                .border_color(border)
+                .border_color(cx.theme().foreground.opacity(0.22))
                 .child(
                     h_flex()
                         .px_3()
@@ -1264,7 +1320,29 @@ impl Render for TabView {
 
 #[cfg(test)]
 mod tests {
-    use super::group_digits;
+    use super::{clip_highlights, group_digits, word_ranges};
+    use gpui_kit::HighlightStyle;
+
+    #[test]
+    fn lines_split_after_each_run_of_spaces() {
+        let line = "    at com.example.Service.method0 (Service.java:310)";
+        let words: Vec<&str> = word_ranges(line).into_iter().map(|r| &line[r]).collect();
+        assert_eq!(words, ["    at ", "com.example.Service.method0 ", "(Service.java:310)"]);
+        assert_eq!(word_ranges("").len(), 0);
+        assert_eq!(word_ranges("   "), vec![0..3]);
+        let path = "GET /api/items/42 200";
+        let joined: String = word_ranges(path).into_iter().map(|r| &path[r]).collect();
+        assert_eq!(joined, path);
+    }
+
+    #[test]
+    fn highlights_are_clipped_to_a_word() {
+        let style = HighlightStyle::default();
+        let all = vec![(2..9, style)];
+        assert_eq!(clip_highlights(&all, &(4..8)), vec![(0..4, style)]);
+        assert_eq!(clip_highlights(&all, &(0..4)), vec![(2..4, style)]);
+        assert!(clip_highlights(&all, &(9..12)).is_empty());
+    }
 
     #[test]
     fn digits_are_grouped_by_thousands() {

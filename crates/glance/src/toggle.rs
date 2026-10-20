@@ -30,9 +30,29 @@ impl ToggleColors {
     }
 }
 
+/// What a switch shows.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ToggleState {
+    Off,
+    On,
+    /// On, but needs the user's attention (e.g. Follow paused): amber instead of blue.
+    Attention,
+}
+
 /// A labeled switch. Chain `.on_click(...)` on the result.
 pub fn toggle(id: impl Into<ElementId>, label: &'static str, tooltip: &'static str, on: bool, cx: &App) -> Stateful<Div> {
-    let colors = ToggleColors::new(cx);
+    toggle_state(id, label.into(), tooltip.into(), if on { ToggleState::On } else { ToggleState::Off }, cx)
+}
+
+/// Like [`toggle`], with a label chosen at run time and the amber state.
+pub fn toggle_state(id: impl Into<ElementId>, label: SharedString, tooltip: SharedString, state: ToggleState, cx: &App) -> Stateful<Div> {
+    let mut colors = ToggleColors::new(cx);
+    if state == ToggleState::Attention {
+        let warn = cx.theme().warning;
+        colors.on_fill = warn.opacity(0.25);
+        colors.on_edge = warn.opacity(0.85);
+    }
+    let on = state != ToggleState::Off;
     div()
         .id(id)
         .px_2()
@@ -45,5 +65,5 @@ pub fn toggle(id: impl Into<ElementId>, label: &'static str, tooltip: &'static s
         .when(on, |s| s.bg(colors.on_fill).border_color(colors.on_edge))
         .when(!on, |s| s.border_color(colors.off_edge).text_color(colors.off_text).hover(|s| s.bg(colors.hover)))
         .child(label)
-        .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(tooltip).build(window, cx))
+        .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(tooltip.clone()).build(window, cx))
 }

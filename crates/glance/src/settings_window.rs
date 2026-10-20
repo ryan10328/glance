@@ -176,11 +176,15 @@ impl Render for SettingsView {
             .child(div().w(px(130.)).child(NumberInput::new(&self.size).small()))
             .child(div().text_color(muted).child("px"))
             .child(Button::new("size-reset").xsmall().ghost().label("Reset").tooltip("Use the default size").on_click(cx.listener(|this, _, window, cx| this.reset_font_size(window, cx))));
-        let context_row = h_flex()
-            .gap_2()
-            .items_center()
+        let context_row = v_flex()
+            .gap_1()
             .child(div().w(px(130.)).child(NumberInput::new(&self.context).small()))
-            .child(div().text_color(muted).child(format!("entries around each match (0 to {MAX_CONTEXT}); applies on the next Apply")));
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(muted)
+                    .child(format!("Entries kept around each match (0 to {MAX_CONTEXT}). Applies the next time you press Apply.")),
+            );
         let path: Option<PathBuf> = settings::settings_dir().map(|dir| dir.join(settings::CONFIG_FILE));
         let shown = path.as_ref().map_or_else(|| "unavailable".to_owned(), |p| p.display().to_string());
         let reveal = path.clone();

@@ -36,7 +36,7 @@ Besides the built-in Level colors, the **Highlight** row under the Filter bar co
 
 ## Detail panel
 
-Selecting an Entry opens a panel on the right with the whole Entry: every line of a stack trace, or pretty-printed JSON for JSON lines. Search matches and Highlight rules are shown on every line there. **Copy entry** copies the selection; `×` closes the panel until you select something else. Drag its edge to resize it. Long lines wrap by default; turn that off in Settings (or `wrap_long_lines = false`) to scroll sideways instead. Entries with more to see are marked in the list: `⋯ +3 lines` for continuation lines, `{ } 12 fields` for a JSON object too long for its row.
+Selecting an Entry opens a panel on the right with the whole Entry: every line of a stack trace, or pretty-printed JSON for JSON lines. Search matches and Highlight rules are shown on every line there. The header shows the Entry's time and size and a **Copy** button for the selection; `×` closes the panel until you select something else. Wrapped lines break between words, so paths like `/api/orders` stay whole. Drag its edge to resize it. Long lines wrap by default; turn that off in Settings (or `wrap_long_lines = false`) to scroll sideways instead. Entries with more to see are marked in the list: `⋯ +3 lines` for continuation lines, `{ } 12 fields` for a JSON object too long for its row.
 
 ## Follow Tail
 

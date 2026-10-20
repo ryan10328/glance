@@ -19,6 +19,8 @@ pub const DETAIL_READ_BYTES: usize = 256 * 1024;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EntryDetail {
     pub text: String,
+    /// Size of the Entry in the file, in bytes.
+    pub size: usize,
     /// The Entry was longer than [`DETAIL_READ_BYTES`], so `text` stops early.
     pub truncated: bool,
 }
@@ -34,9 +36,9 @@ pub fn format_detail(format: Format, bytes: &[u8], entry_len: usize) -> EntryDet
         && let Ok(value) = serde_json::from_str::<serde_json::Value>(raw.trim())
         && let Ok(pretty) = serde_json::to_string_pretty(&value)
     {
-        return EntryDetail { text: pretty, truncated };
+        return EntryDetail { text: pretty, size: entry_len, truncated };
     }
-    EntryDetail { text: raw.replace("\r\n", "\n"), truncated }
+    EntryDetail { text: raw.replace("\r\n", "\n"), size: entry_len, truncated }
 }
 
 /// Reads one Entry in full (up to [`DETAIL_READ_BYTES`]); `None` when it is not indexed.
@@ -47,6 +49,42 @@ pub fn read_detail(index: &EntryIndex, reader: &BlockReader, entry: usize, forma
     let n = reader.read_at(range.start, &mut buf)?;
     buf.truncate(n);
     Ok(Some(format_detail(format, &buf, len)))
+}
+
+/// The first `hh:mm:ss` (with fractional seconds when written) in `text`, as
+/// it appears there. Looks only at the start, where an Entry's time sits.
+pub fn time_of_day(text: &str) -> Option<&str> {
+    let head = &text.as_bytes()[..text.len().min(400)];
+    let digit = |i: usize| head.get(i).is_some_and(u8::is_ascii_digit);
+    for i in 0..head.len() {
+        let at = |j: usize, c: u8| head.get(i + j) == Some(&c);
+        let shape = digit(i) && digit(i + 1) && at(2, b':') && digit(i + 3) && digit(i + 4) && at(5, b':') && digit(i + 6) && digit(i + 7);
+        // A longer digit run before it means this is the middle of some other number.
+        if shape && (i == 0 || !head[i - 1].is_ascii_digit()) {
+            let mut end = i + 8;
+            if matches!(head.get(end), Some(b'.' | b',')) && digit(end + 1) {
+                end += 1;
+                while digit(end) {
+                    end += 1;
+                }
+            }
+            return text.get(i..end);
+        }
+    }
+    None
+}
+
+/// `118 B`, `4.2 KB`, `1.3 MB`.
+pub fn human_size(bytes: usize) -> String {
+    const KB: f64 = 1024.0;
+    let b = bytes as f64;
+    if bytes < 1024 {
+        format!("{bytes} B")
+    } else if b < KB * KB {
+        format!("{:.1} KB", b / KB)
+    } else {
+        format!("{:.1} MB", b / KB / KB)
+    }
 }
 
 /// Number of top-level fields of a JSON-lines Entry, or `None` when it is
@@ -155,6 +193,23 @@ pub fn copy_entries(
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn the_time_of_day_is_found_as_written() {
+        assert_eq!(time_of_day("2026-10-18 00:00:01.455 ERROR x"), Some("00:00:01.455"));
+        assert_eq!(time_of_day("{\n  \"time\": \"2026-10-18T19:50:03Z\"\n}"), Some("19:50:03"));
+        assert_eq!(time_of_day("Oct 18 07:05:09 host app: x"), Some("07:05:09"));
+        assert_eq!(time_of_day("no time here, took 12:3"), None);
+        assert_eq!(time_of_day("123:45:67 is not a time"), None);
+    }
+
+    #[test]
+    fn sizes_are_human_readable() {
+        assert_eq!(human_size(0), "0 B");
+        assert_eq!(human_size(1023), "1023 B");
+        assert_eq!(human_size(4300), "4.2 KB");
+        assert_eq!(human_size(1_363_149), "1.3 MB");
+    }
 
     #[test]
     fn json_lines_are_pretty_printed() {

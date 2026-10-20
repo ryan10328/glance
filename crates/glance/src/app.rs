@@ -19,6 +19,7 @@ use gpui_kit::*;
 use crate::highlight_bar::{HighlightBar, HighlightBarEvent};
 use crate::settings_window::SettingsView;
 use crate::tab_view::{FollowState, TabView};
+use crate::toggle::{ToggleState, toggle_state};
 
 const POLL_TICK: Duration = Duration::from_millis(500);
 /// Background Tabs are polled every this many ticks (about 2 s).
@@ -283,16 +284,16 @@ impl GlanceApp {
         .detach();
     }
 
-    fn toggle_format(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Reopens the current file as `next`. Format is chosen per file, so the Tab is rebuilt.
+    fn set_format(&mut self, next: Format, window: &mut Window, cx: &mut Context<Self>) {
         let Some(tab) = self.tabs.get(self.active) else { return };
         let (path, format) = {
             let tab = tab.read(cx);
             (tab.path().to_owned(), tab.file().format())
         };
-        let next = match format {
-            Format::PlainText => Format::JsonLines,
-            Format::JsonLines => Format::PlainText,
-        };
+        if format == next {
+            return;
+        }
         match LogFile::open(&path, Some(next)) {
             Ok(file) => {
                 let tab = TabView::new(file, self.config.clone(), self.highlighter.clone(), self.highlight_bar.clone(), window, cx);
@@ -301,6 +302,7 @@ impl GlanceApp {
             }
             Err(e) => self.message = Some(e.to_string()),
         }
+        cx.notify();
     }
 
     fn render_welcome(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -395,29 +397,30 @@ impl GlanceApp {
         let entries = if shown == total { format!("{total} entries") } else { format!("{shown} of {total} entries") };
         let message = tab.message().map(str::to_owned).or_else(|| self.message.clone());
         bar.child("UTF-8")
-            .child(
-                div()
-                    .id("format")
-                    .cursor_pointer()
-                    .child(format!("{} ▾", tab.file().format().as_str()))
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.toggle_format(window, cx);
-                        cx.notify();
-                    })),
-            )
+            .child({
+                let app = cx.entity();
+                let current = tab.file().format();
+                Button::new("format").ghost().xsmall().label(format!("{} ▾", current.as_str())).tooltip("File format").dropdown_menu(move |menu, _, _| {
+                    [Format::PlainText, Format::JsonLines].into_iter().fold(menu, |menu, format| {
+                        let app = app.clone();
+                        menu.item(PopupMenuItem::new(format.as_str()).checked(current == format).on_click(move |_, window, cx| {
+                            app.update(cx, |app, cx| app.set_format(format, window, cx));
+                        }))
+                    })
+                })
+            })
             .child(entries)
             .children(indexing.is_none().then_some("indexed"))
             .children(message)
             .child(div().flex_1())
             .child({
-                let (label, tooltip) = match follow {
-                    FollowState::Off => ("○ Follow", "Keep the view at the end as new Entries arrive"),
-                    FollowState::Following => ("● Following", "Stop following"),
-                    FollowState::Paused => ("⏸ Follow paused", "Paused because you scrolled up. Click to scroll to the bottom and follow again"),
+                let (label, tooltip, state) = match follow {
+                    FollowState::Off => ("○ Follow", "Keep the view at the end as new Entries arrive", ToggleState::Off),
+                    FollowState::Following => ("● Following", "Stop following", ToggleState::On),
+                    FollowState::Paused => ("⏸ Follow paused", "Paused because you scrolled up. Click to scroll to the bottom and follow again", ToggleState::Attention),
                 };
-                let button = Button::new("follow").xsmall().label(label).tooltip(tooltip);
-                let button = if follow == FollowState::Following { button.primary() } else { button.ghost() };
-                button.on_click(cx.listener(move |_, _, _, cx| tab_entity.update(cx, |tab, cx| tab.toggle_follow(cx))))
+                toggle_state("follow", label.into(), tooltip.into(), state, cx)
+                    .on_click(cx.listener(move |_, _, _, cx| tab_entity.update(cx, |tab, cx| tab.toggle_follow(cx))))
             })
             .children(progress.map(|(label, percent)| {
                 h_flex()
