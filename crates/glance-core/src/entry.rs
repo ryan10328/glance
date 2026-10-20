@@ -3,6 +3,7 @@
 use std::fmt;
 use std::io;
 
+use crate::format::Format;
 use crate::index::EntryIndex;
 use crate::reader::BlockReader;
 
@@ -10,6 +11,60 @@ use crate::reader::BlockReader;
 pub const MAX_DISPLAY_BYTES: usize = 4096;
 /// How much of an Entry is read to summarize it.
 const SUMMARY_READ_BYTES: usize = 64 * 1024;
+
+/// How much of one Entry the detail panel reads.
+pub const DETAIL_READ_BYTES: usize = 256 * 1024;
+
+/// One Entry in full, for the detail panel.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EntryDetail {
+    pub text: String,
+    /// The Entry was longer than [`DETAIL_READ_BYTES`], so `text` stops early.
+    pub truncated: bool,
+}
+
+/// Turns an Entry's bytes into display text: JSON lines are pretty-printed
+/// (when complete and valid), plain text is shown as written.
+pub fn format_detail(format: Format, bytes: &[u8], entry_len: usize) -> EntryDetail {
+    let truncated = entry_len > bytes.len();
+    let raw = String::from_utf8_lossy(bytes);
+    let raw = raw.trim_end_matches(['\n', '\r']);
+    if format == Format::JsonLines
+        && !truncated
+        && let Ok(value) = serde_json::from_str::<serde_json::Value>(raw.trim())
+        && let Ok(pretty) = serde_json::to_string_pretty(&value)
+    {
+        return EntryDetail { text: pretty, truncated };
+    }
+    EntryDetail { text: raw.replace("\r\n", "\n"), truncated }
+}
+
+/// Reads one Entry in full (up to [`DETAIL_READ_BYTES`]); `None` when it is not indexed.
+pub fn read_detail(index: &EntryIndex, reader: &BlockReader, entry: usize, format: Format) -> io::Result<Option<EntryDetail>> {
+    let Some(range) = index.entry_range(entry) else { return Ok(None) };
+    let len = (range.end - range.start) as usize;
+    let mut buf = vec![0u8; len.min(DETAIL_READ_BYTES)];
+    let n = reader.read_at(range.start, &mut buf)?;
+    buf.truncate(n);
+    Ok(Some(format_detail(format, &buf, len)))
+}
+
+/// Number of top-level fields of a JSON-lines Entry, or `None` when it is
+/// not a complete JSON object or too long to be read whole.
+pub fn json_field_count(index: &EntryIndex, reader: &BlockReader, entry: usize) -> io::Result<Option<usize>> {
+    let Some(range) = index.entry_range(entry) else { return Ok(None) };
+    let len = (range.end - range.start) as usize;
+    if len > DETAIL_READ_BYTES {
+        return Ok(None);
+    }
+    let mut buf = vec![0u8; len];
+    let n = reader.read_at(range.start, &mut buf)?;
+    buf.truncate(n);
+    Ok(match serde_json::from_slice::<serde_json::Value>(&buf) {
+        Ok(serde_json::Value::Object(map)) => Some(map.len()),
+        _ => None,
+    })
+}
 
 /// What the Entry view shows for one Entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -102,6 +157,28 @@ mod tests {
     use std::io::Write;
 
     #[test]
+    fn json_lines_are_pretty_printed() {
+        let d = format_detail(Format::JsonLines, b"{\"level\":\"error\",\"msg\":\"x\"}\n", 28);
+        assert_eq!(d.text, "{\n  \"level\": \"error\",\n  \"msg\": \"x\"\n}");
+        assert!(!d.truncated);
+    }
+
+    #[test]
+    fn plain_text_and_invalid_json_are_shown_as_written() {
+        let plain = format_detail(Format::PlainText, b"2026 ERROR failed\r\n    at a\r\n", 31);
+        assert_eq!(plain.text, "2026 ERROR failed\n    at a");
+        let broken = format_detail(Format::JsonLines, b"{not json\n", 11);
+        assert_eq!(broken.text, "{not json");
+    }
+
+    #[test]
+    fn long_entries_are_flagged_truncated_and_not_reformatted() {
+        let d = format_detail(Format::JsonLines, b"{\"a\":1", 1_000_000);
+        assert!(d.truncated);
+        assert_eq!(d.text, "{\"a\":1");
+    }
+
+    #[test]
     fn summary_counts_continuation_lines() {
         let s = summarize(b"2026 ERROR failed\n    at a\n    at b\n", 36);
         assert_eq!(s.first_line, "2026 ERROR failed");
@@ -153,6 +230,14 @@ mod tests {
         assert_eq!(s.first_line, "2026-10-18 19:50:02 ERROR b");
         assert_eq!(s.extra_lines, 1);
         assert!(read_summary(&index, &reader, 9).unwrap().is_none());
+    }
+
+    #[test]
+    fn json_objects_report_their_field_count() {
+        let (_f, reader, index) = fixture("{\"level\":\"info\",\"msg\":\"a\",\"n\":1}\n[1,2]\n");
+        assert_eq!(json_field_count(&index, &reader, 0).unwrap(), Some(3));
+        assert_eq!(json_field_count(&index, &reader, 1).unwrap(), None);
+        assert_eq!(json_field_count(&index, &reader, 9).unwrap(), None);
     }
 
     #[test]

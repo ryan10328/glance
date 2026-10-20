@@ -1,12 +1,13 @@
 //! One open Log File: its Filter, selection, scrolling and Entry view.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::ops::Range;
 use std::path::Path;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use glance_core::entry;
+use glance_core::entry::{self, EntryDetail};
 use glance_core::filter::{CompiledFilter, FilterContext, FilteredView, TextPattern, ViewRow};
 use glance_core::format::{parse_entry, resolve_time_zone};
 use glance_core::highlight::{Highlighter, Rgb, palette_rgb};
@@ -16,7 +17,7 @@ use glance_core::session::{LogFile, Polled};
 use glance_core::settings::Config;
 use glance_core::watch::Rotation;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::resizable::{ResizableState, resizable_panel, v_resizable};
+use gpui_kit::component::resizable::{ResizableState, h_resizable, resizable_panel, v_resizable};
 use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
 use gpui_kit::component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -32,6 +33,8 @@ actions!(glance, [CopySelection, OpenSearch, CloseSearch]);
 
 pub const DEFAULT_FONT_SIZE: f32 = 13.0;
 const GUTTER_WIDTH: f32 = 72.0;
+/// Lines of one Entry the detail panel renders.
+const DETAIL_MAX_LINES: usize = 5000;
 /// Largest selection that can be copied at once.
 const COPY_LIMIT: usize = 64 * 1024 * 1024;
 /// Entries examined per step while a Filter catches up with the index.
@@ -113,6 +116,20 @@ pub struct TabView {
     follow_render: usize,
     /// (renders so far, end of the visible row range) as of the last Entry view render.
     view_state: Rc<Cell<(usize, usize)>>,
+    detail_split: Entity<ResizableState>,
+    /// The user closed the detail panel for the current selection.
+    detail_hidden: bool,
+    /// The Entry the panel last showed, to reopen it when the selection moves on.
+    detail_for: Option<usize>,
+    /// (Entry, file generation, content) of the last Entry read for the panel.
+    detail_cache: RefCell<Option<(usize, u64, Rc<EntryDetail>)>>,
+    detail_scroll: ScrollHandle,
+    /// Entries just copied (for the button's feedback), until `copy_token` moves on.
+    copied: Option<usize>,
+    copy_token: u64,
+    copy_error: Option<String>,
+    /// Field counts of long JSON Entries, for the row label; `None` when not countable.
+    field_counts: RefCell<HashMap<usize, Option<usize>>>,
 }
 
 /// `81799` becomes `81,799`.
@@ -224,6 +241,15 @@ impl TabView {
                 follow_rows: usize::MAX,
                 follow_render: 0,
                 view_state: Rc::new(Cell::new((0, 0))),
+                detail_split: cx.new(|_| ResizableState::default()),
+                detail_hidden: false,
+                detail_for: None,
+                detail_cache: RefCell::new(None),
+                detail_scroll: ScrollHandle::new(),
+                copied: None,
+                copy_token: 0,
+                copy_error: None,
+                field_counts: RefCell::new(HashMap::new()),
             }
         })
     }
@@ -302,6 +328,7 @@ impl TabView {
         self.selection.clear();
         self.results = None;
         self.find_pending = false;
+        self.field_counts.borrow_mut().clear();
         self.scroll_x = 0.0;
         self.max_chars.set(0);
         if let Some((compiled, _)) = self.filter.take() {
@@ -672,11 +699,45 @@ impl TabView {
         }
         let index = self.file.index().read().unwrap();
         match entry::copy_entries(&index, self.file.reader(), self.selection.rows(), COPY_LIMIT) {
-            Ok(text) => cx.write_to_clipboard(ClipboardItem::new_string(text)),
-            Err(e) => self.message = Some(e.to_string()),
+            Ok(text) => {
+                cx.write_to_clipboard(ClipboardItem::new_string(text));
+                self.copy_error = None;
+                self.copied = Some(self.selection.len());
+                self.copy_token += 1;
+                let token = self.copy_token;
+                cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(Duration::from_millis(1500)).await;
+                    let _ = this.update(cx, |this, cx| {
+                        if this.copy_token == token {
+                            this.copied = None;
+                            cx.notify();
+                        }
+                    });
+                })
+                .detach();
+            }
+            Err(e) => {
+                self.copied = None;
+                self.copy_error = Some(e.to_string());
+                self.message = Some(e.to_string());
+            }
         }
         drop(index);
         cx.notify();
+    }
+
+    /// Label for a long JSON Entry that the row cannot show whole (a cut first line).
+    fn json_label(&self, index: &glance_core::index::EntryIndex, entry_no: usize) -> String {
+        let cached = self.field_counts.borrow().get(&entry_no).copied();
+        let count = cached.unwrap_or_else(|| {
+            let count = entry::json_field_count(index, self.file.reader(), entry_no).ok().flatten();
+            self.field_counts.borrow_mut().insert(entry_no, count);
+            count
+        });
+        match count {
+            Some(n) => format!("{{ }} {n} fields"),
+            None => "{ } …".to_owned(),
+        }
     }
 
     fn scroll_horizontally(&mut self, dx: f32, font_size: f32) {
@@ -727,9 +788,9 @@ impl TabView {
         let palette = LevelPalette::new(cx);
         let dark = cx.theme().is_dark();
         let highlighter = self.highlighter.clone();
-        let (muted, selected_bg, hover_bg, current_bg, found_bg) = {
+        let (muted, selected_bg, hover_bg, current_bg, found_bg, badge_bg) = {
             let theme = cx.theme();
-            (theme.muted_foreground, theme.list_active, theme.list_hover, theme.accent, theme.warning)
+            (theme.muted_foreground, theme.list_active, theme.list_hover, theme.accent, theme.warning, theme.muted)
         };
         let list = uniform_list(
             "entries",
@@ -745,15 +806,22 @@ impl TabView {
                         };
                         let entry_no = view_row.entry;
                         let summary = entry::read_summary(&index, &reader, entry_no).ok().flatten();
-                        let (text, extra, more) =
-                            summary.map_or((String::new(), 0, false), |s| (s.first_line, s.extra_lines, s.more));
+                        let (text, extra, more, cut) =
+                            summary.map_or((String::new(), 0, false, false), |s| (s.first_line, s.extra_lines, s.more, s.truncated));
                         max_chars.set(max_chars.get().max(text.chars().count() + 12));
                         let level = parse_entry(this.ctx.format, this.ctx.rule, text.as_bytes(), &this.ctx.zone).level;
                         let LevelStyle { tint, faded } = palette.style(level);
                         // Search matches get a background; the user's Highlight Rules color the text.
                         let search_ranges = this.search.as_ref().map(|s| s.occurrences(text.as_bytes())).unwrap_or_default();
                         let found = merge_highlights(&text, search_ranges, highlighter.text_spans(text.as_bytes()), dark, found_bg.opacity(0.55));
-                        let badge = (extra > 0).then(|| format!("  [+{extra}{} lines]", if more { "+" } else { "" }));
+                        // A hint that the detail panel has more: continuation lines, or a JSON object too long for the row.
+                        let badge = if extra > 0 {
+                            Some(format!("⋯ +{extra}{} lines", if more { "+" } else { "" }))
+                        } else if cut && this.ctx.format == glance_core::format::Format::JsonLines {
+                            Some(this.json_label(&index, entry_no))
+                        } else {
+                            None
+                        };
                         Some(
                             h_flex()
                                 .id(("row", row))
@@ -776,13 +844,14 @@ impl TabView {
                                 )
                                 .child(
                                     div().flex_1().h_full().overflow_hidden().child(
-                                        div()
+                                        h_flex()
                                             .relative()
                                             .left(px(-scroll_x))
+                                            .items_center()
                                             .whitespace_nowrap()
                                             .when(faded, |s| s.text_color(muted))
                                             .child(StyledText::new(text).with_highlights(found))
-                                            .children(badge.map(|b| div().text_color(muted).child(b))),
+                                            .children(badge.map(|b| div().ml_2().px_1().rounded(px(3.)).bg(badge_bg).text_color(muted).child(b))),
                                     ),
                                 )
                                 .on_mouse_down(
@@ -837,6 +906,157 @@ impl TabView {
 }
 
 impl TabView {
+    /// The Entry the detail panel shows: the one last clicked, else any selected.
+    fn detail_entry(&self) -> Option<usize> {
+        self.selection.anchor().filter(|e| self.selection.contains(*e)).or_else(|| self.selection.rows().next())
+    }
+
+    fn detail_of(&self, entry: usize) -> Option<Rc<EntryDetail>> {
+        if let Some((e, g, detail)) = &*self.detail_cache.borrow()
+            && (*e, *g) == (entry, self.generation)
+        {
+            return Some(detail.clone());
+        }
+        let index = self.file.index().read().unwrap();
+        let detail = Rc::new(entry::read_detail(&index, self.file.reader(), entry, self.ctx.format).ok().flatten()?);
+        *self.detail_cache.borrow_mut() = Some((entry, self.generation, detail.clone()));
+        Some(detail)
+    }
+
+    fn render_detail(&self, entry: usize, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let detail = self.detail_of(entry)?;
+        let first = detail.text.lines().next().unwrap_or("");
+        let level = parse_entry(self.ctx.format, self.ctx.rule, first.as_bytes(), &self.ctx.zone).level;
+        let level_label = level.map_or("No level", |l| l.as_str());
+        let palette = LevelPalette::new(cx);
+        let LevelStyle { tint, .. } = palette.style(level);
+        let dark = cx.theme().is_dark();
+        let (muted, border, header_bg, found_bg, foreground) = {
+            let theme = cx.theme();
+            (theme.muted_foreground, theme.border, theme.secondary, theme.warning, theme.foreground)
+        };
+        let wrap = self.config.wrap_long_lines;
+        let detail_scroll = self.detail_scroll.clone();
+        let family: SharedString = self.config.font_family.clone().unwrap_or_else(|| DEFAULT_FONT.to_owned()).into();
+        let font_size = self.font_size();
+        let line_height = (font_size * 1.5).ceil();
+        let total_lines = detail.text.lines().count();
+        let lines: Vec<AnyElement> = detail
+            .text
+            .lines()
+            .take(DETAIL_MAX_LINES)
+            .enumerate()
+            .map(|(i, line)| {
+                let search = self.search.as_ref().map(|s| s.occurrences(line.as_bytes())).unwrap_or_default();
+                let found = merge_highlights(line, search, self.highlighter.text_spans(line.as_bytes()), dark, found_bg.opacity(0.55));
+                div()
+                    .id(("detail-line", i))
+                    .min_h(px(line_height))
+                    .when(wrap, |d| d.whitespace_normal())
+                    .when(!wrap, |d| d.whitespace_nowrap())
+                    .child(StyledText::new(line.to_owned()).with_highlights(found))
+                    .into_any_element()
+            })
+            .collect();
+        let selected = self.selection.len();
+        let copy_label = match (self.copied, selected > 1) {
+            (Some(n), true) => format!("✓ Copied {n} entries"),
+            (Some(_), false) => "✓ Copied".to_owned(),
+            (None, true) => format!("Copy {selected} entries"),
+            (None, false) => "Copy entry".to_owned(),
+        };
+        let danger = cx.theme().danger;
+        let notes = [
+            (total_lines > DETAIL_MAX_LINES).then(|| format!("… {} more lines not shown", total_lines - DETAIL_MAX_LINES)),
+            detail.truncated.then(|| "… the Entry is longer than what is shown".to_owned()),
+        ];
+        Some(
+            v_flex()
+                .size_full()
+                .border_l_2()
+                .border_color(border)
+                .child(
+                    h_flex()
+                        .px_3()
+                        .py_1()
+                        .gap_2()
+                        .items_center()
+                        .justify_between()
+                        .bg(header_bg)
+                        .border_b_1()
+                        .border_color(border)
+                        .child(
+                            h_flex()
+                                .gap_2()
+                                .items_center()
+                                .child(div().font_weight(FontWeight::SEMIBOLD).child(format!("Entry {}", entry + 1)))
+                                .child(div().px_1().rounded(px(3.)).when_some(tint, |s, tint| s.bg(tint)).child(level_label))
+                                .children((selected > 1).then(|| div().text_color(muted).child(format!("{selected} selected")))),
+                        )
+                        .child(Button::new("detail-close").xsmall().ghost().label("×").tooltip("Close the detail panel").on_click(cx.listener(
+                            |this, _, _, cx| {
+                                this.detail_hidden = true;
+                                cx.notify();
+                            },
+                        ))),
+                )
+                .child(
+                    div()
+                        .relative()
+                        .flex_1()
+                        .min_h_0()
+                        .child(
+                            div()
+                                .id("detail-body")
+                                .size_full()
+                                // A row container lets the lines grow to their natural width when not wrapping,
+                                // which is what makes the content wider than the panel and the bar appear.
+                                .flex()
+                                .items_start()
+                                .overflow_scroll()
+                                .track_scroll(&detail_scroll)
+                                .p_2()
+                                .font_family(family)
+                                .text_size(px(font_size))
+                                .text_color(foreground)
+                                .child(
+                                    v_flex()
+                                        .when(wrap, |d| d.w_full())
+                                        .when(!wrap, |d| d.min_w_full().flex_none())
+                                        .children(lines)
+                                        .children(notes.into_iter().flatten().map(|note| div().text_color(muted).child(note))),
+                                ),
+                        )
+                        .child(
+                            div().absolute().top_0().right_0().bottom_0().w(Scrollbar::width()).child(
+                                Scrollbar::vertical(&detail_scroll).mode(ScrollbarMode::Always),
+                            ),
+                        )
+                        .child(
+                            div().absolute().left_0().right_0().bottom_0().h(Scrollbar::width()).child(
+                                Scrollbar::horizontal(&detail_scroll).mode(ScrollbarMode::Always),
+                            ),
+                        ),
+                )
+                .child(
+                    h_flex()
+                        .px_3()
+                        .py_1()
+                        .gap_2()
+                        .items_center()
+                        .border_t_1()
+                        .border_color(border)
+                        .child({
+                            let button = Button::new("detail-copy").xsmall().label(copy_label).tooltip("Copy the selected Entries (Cmd/Ctrl+C)");
+                            let button = if self.copied.is_some() { button.primary() } else { button.outline() };
+                            button.on_click(cx.listener(|this, _, _, cx| this.copy_selection(cx)))
+                        })
+                        .children(self.copy_error.clone().map(|e| div().text_color(danger).text_sm().child(e))),
+                )
+                .into_any_element(),
+        )
+    }
+
     fn render_results(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let results = self.results.as_ref()?;
         let count = results.entries.len();
@@ -957,6 +1177,12 @@ impl TabView {
 impl Render for TabView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let border = cx.theme().border;
+        let shown = self.detail_entry();
+        if shown != self.detail_for {
+            self.detail_for = shown;
+            self.detail_hidden = false;
+        }
+        let detail = shown.filter(|_| !self.detail_hidden).and_then(|entry| self.render_detail(entry, cx));
         v_flex()
             .size_full()
             .on_action(cx.listener(|this, _: &OpenSearch, window, cx| this.open_search(window, cx)))
@@ -976,18 +1202,31 @@ impl Render for TabView {
             .child({
                 let results = self.render_results(cx);
                 let entry_view = self.render_entry_view(cx);
-                match results {
-                Some(results) => div()
-                    .flex_1()
-                    .min_h_0()
-                    .child(
-                        v_resizable("results-split")
-                            .with_state(&self.split)
-                            .child(resizable_panel().child(v_flex().size_full().child(entry_view)))
-                            .child(resizable_panel().size(px(220.)).size_range(px(90.)..px(2000.)).child(results)),
-                    )
-                    .into_any_element(),
-                None => entry_view.into_any_element(),
+                let main_area = match results {
+                    Some(results) => div()
+                        .flex_1()
+                        .min_h_0()
+                        .child(
+                            v_resizable("results-split")
+                                .with_state(&self.split)
+                                .child(resizable_panel().child(v_flex().size_full().child(entry_view)))
+                                .child(resizable_panel().size(px(220.)).size_range(px(90.)..px(2000.)).child(results)),
+                        )
+                        .into_any_element(),
+                    None => entry_view.into_any_element(),
+                };
+                match detail {
+                    Some(detail) => div()
+                        .flex_1()
+                        .min_h_0()
+                        .child(
+                            h_resizable("detail-split")
+                                .with_state(&self.detail_split)
+                                .child(resizable_panel().child(v_flex().size_full().child(main_area)))
+                                .child(resizable_panel().size(px(360.)).size_range(px(220.)..px(1400.)).child(detail)),
+                        )
+                        .into_any_element(),
+                    None => main_area,
                 }
             })
     }

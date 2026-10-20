@@ -67,10 +67,10 @@ pub struct HighlightRule {
 }
 
 /// User-edited preferences.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
-    /// Wrap long lines in the detail panel (the Entry view never wraps).
+    /// Wrap long lines in the detail panel (the Entry view never wraps). On by default.
     pub wrap_long_lines: bool,
     /// Monospace font of the Entry view; `None` picks the platform default.
     pub font_family: Option<String>,
@@ -78,6 +78,12 @@ pub struct Config {
     pub font_size: Option<f32>,
     /// Entries kept visible around each Filter match (0 to 50).
     pub filter_context: usize,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self { wrap_long_lines: true, font_family: None, font_size: None, filter_context: 0 }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -157,9 +163,13 @@ mod tests {
     fn partial_file_fills_defaults() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(CONFIG_FILE);
-        fs::write(&path, "wrap_long_lines = true\n").unwrap();
+        fs::write(&path, "font_size = 15.0\n").unwrap();
         let config: Config = load(&path).unwrap();
+        assert_eq!(config.font_size, Some(15.0));
+        // Fields missing from the file keep their defaults: long lines wrap in the detail panel.
         assert!(config.wrap_long_lines);
+        fs::write(&path, "wrap_long_lines = false\n").unwrap();
+        assert!(!load::<Config>(&path).unwrap().wrap_long_lines);
     }
 
     #[test]

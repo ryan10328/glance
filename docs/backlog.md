@@ -24,7 +24,8 @@ Multi-file merged timeline, OS file association, saving Filter results to a file
 - [x] 12d. Color theme (System, Light, Dark) from the Tab bar
 - [x] 12c. Settings window
 - [x] 13. Follow Tail UI
-- [ ] 14. Detail panel
+- [x] 14a. Detail panel: full Entry, Copy entry, Search marks
+- [ ] 14b. Detail panel: copy a field value, Show Context
 - [ ] 15. Keyboard shortcuts
 - [ ] 16. Bookmarks (low priority)
 - [ ] 17. Third-party license notices (before the first binary release)
@@ -92,11 +93,9 @@ Multi-file merged timeline, OS file association, saving Filter results to a file
 - Toggle in the footer (off by default, per Tab, not remembered); auto-pause when scrolling up, resume at the bottom or with the floating "Resume Follow" button.
 - Rotation notice bar with a "Reload" button (built in ticket 9); a Rotation also turns Follow off.
 
-### 14. Detail panel (ui)
-- Selected Entry in full: pretty-printed JSON for JSON lines, full text otherwise.
-- Copy a field value.
-- "Show Context" for a single Entry (moved from ticket 11): show the Entries around the selected one without a Filter.
-- Mark Search occurrences that fall outside the first line (the Entry view shows only the first line).
+### 14. Detail panel (ui), in two steps
+- 14a: a panel to the right of the Entry view (resizable, about 360 px) that shows the selected Entry in full: pretty-printed JSON for JSON lines, all lines otherwise. It appears while something is selected and can be closed with `×` until the selection changes. Search occurrences and Highlight Rules are shown in every line (the Entry view marks only the first). With several Entries selected it shows the last clicked one and "N selected". "Copy entry" copies the selection. Long lines wrap by default (`wrap_long_lines`, also a checkbox in Settings); with wrapping off the body has scrollbars. The list marks Entries with more to see (`⋯ +N lines`, and `{ } N fields` for a JSON object too long for its row). "Copy entry" answers with "✓ Copied" for a moment.
+- 14b: copy a single field value of a JSON Entry (a `Copy` button on the hovered line); "Show Context" for a single Entry (moved from ticket 11): the Entries around the selected one, without a Filter.
 
 ### 15. Keyboard shortcuts (ui)
 - Jump to the next ERROR-or-above Entry (moved from ticket 11).

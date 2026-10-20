@@ -34,6 +34,10 @@ The workspace has two crates:
 
 Besides the built-in Level colors, the **Highlight** row under the Filter bar colors any text you choose, as you type. Pick a color for each rule; `*` and `?` are wildcards unless `.* Regex` is on. Only the matching text changes color, so Level colors stay readable. Rules are shared by every tab and remembered in `state.toml`; where two rules overlap, the upper one wins. Search matches get a background on top.
 
+## Detail panel
+
+Selecting an Entry opens a panel on the right with the whole Entry: every line of a stack trace, or pretty-printed JSON for JSON lines. Search matches and Highlight rules are shown on every line there. **Copy entry** copies the selection; `×` closes the panel until you select something else. Drag its edge to resize it. Long lines wrap by default; turn that off in Settings (or `wrap_long_lines = false`) to scroll sideways instead. Entries with more to see are marked in the list: `⋯ +3 lines` for continuation lines, `{ } 12 fields` for a JSON object too long for its row.
+
 ## Follow Tail
 
 The footer's **Follow** button keeps the view at the end as new Entries arrive, like `tail -f`. Scrolling up pauses it; scroll back to the bottom or press **Resume Follow** to continue. It is off by default and applies to the current tab only.

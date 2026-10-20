@@ -7,6 +7,7 @@ use std::rc::Rc;
 use glance_core::filter::MAX_CONTEXT;
 use glance_core::settings::{self, Config, ThemeChoice};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::{InputEvent, InputState, NumberInput, NumberInputEvent, StepAction};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::searchable_list::SearchableVec;
@@ -101,6 +102,10 @@ impl SettingsView {
     fn set_context(&mut self, value: usize, cx: &mut Context<Self>) {
         let value = value.min(MAX_CONTEXT);
         self.app.update(cx, |app, cx| app.update_config(|c| c.filter_context = value, cx));
+    }
+
+    fn set_wrap(&mut self, wrap: bool, cx: &mut Context<Self>) {
+        self.app.update(cx, |app, cx| app.update_config(|c| c.wrap_long_lines = wrap, cx));
     }
 
     fn reset_font(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -208,6 +213,17 @@ impl Render for SettingsView {
                         muted,
                     )),
             )
+            .child(Self::section("Detail panel", border).child(Self::row(
+                "Long lines",
+                {
+                    let this = cx.entity();
+                    Checkbox::new("wrap-lines").small().checked(config.wrap_long_lines).child("Wrap long lines").on_click(move |checked, _, cx| {
+                        let checked = *checked;
+                        this.update(cx, |this, cx| this.set_wrap(checked, cx));
+                    })
+                },
+                muted,
+            )))
             .child(Self::section("Filter", border).child(Self::row("Context", context_row, muted)))
             .child(
                 h_flex()
