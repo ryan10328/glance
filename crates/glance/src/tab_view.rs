@@ -788,9 +788,11 @@ impl TabView {
         let palette = LevelPalette::new(cx);
         let dark = cx.theme().is_dark();
         let highlighter = self.highlighter.clone();
-        let (muted, selected_bg, hover_bg, current_bg, found_bg, badge_bg) = {
+        // Selection is blue, which no Level uses (WARN is yellow, ERROR and FATAL red).
+        let (muted, selected_bg, selected_edge, hover_bg, found_bg, badge_bg, foreground) = {
             let theme = cx.theme();
-            (theme.muted_foreground, theme.list_active, theme.list_hover, theme.accent, theme.warning, theme.muted)
+            let (fill, edge) = if dark { (0.32, 0.8) } else { (0.22, 0.7) };
+            (theme.muted_foreground, theme.info.opacity(fill), theme.info.opacity(edge), theme.list_hover, theme.warning, theme.muted, theme.foreground)
         };
         let list = uniform_list(
             "entries",
@@ -805,6 +807,18 @@ impl TabView {
                             None => ViewRow { entry: row, is_match: true },
                         };
                         let entry_no = view_row.entry;
+                        let selected = selection.contains(entry_no);
+                        // The Entry index is already read-locked here, so neighbors are found without `row_at`
+                        // (taking a second read lock can deadlock against the indexing thread).
+                        let neighbor_selected = |r: usize| {
+                            let entry = match &this.filter {
+                                Some((_, view)) => view.row(r).map(|v| v.entry),
+                                None => (r < count).then_some(r),
+                            };
+                            entry.is_some_and(|e| selection.contains(e))
+                        };
+                        let prev_selected = row > 0 && neighbor_selected(row - 1);
+                        let next_selected = neighbor_selected(row + 1);
                         let summary = entry::read_summary(&index, &reader, entry_no).ok().flatten();
                         let (text, extra, more, cut) =
                             summary.map_or((String::new(), 0, false, false), |s| (s.first_line, s.extra_lines, s.more, s.truncated));
@@ -831,10 +845,17 @@ impl TabView {
                                 .flex_none()
                                 .when(!view_row.is_match, |s| s.opacity(0.55))
                                 .when_some(tint, |s, tint| s.bg(tint))
-                                .when(selection.contains(entry_no), |s| s.bg(selected_bg))
-                                .when(this.search_current == Some(row), |s| s.bg(current_bg))
-                                .hover(|s| s.bg(hover_bg))
+                                .when(selected, |s| s.bg(selected_bg))
+                                // A selection gets an edge line where it starts and ends, so a block reads as one.
+                                .when(selected && !prev_selected, |s| s.border_t_1().border_color(selected_edge))
+                                .when(selected && !next_selected, |s| s.border_b_1().border_color(selected_edge))
+                                .when(!selected && this.search_current == Some(row), |s| s.border_y_1().border_color(muted.opacity(0.6)))
+                                .when(!selected, |s| s.hover(|s| s.bg(hover_bg)))
                                 .children(stripe.map(|(color, width)| div().absolute().left_0().top_0().bottom_0().w(px(width)).bg(color)))
+                                // The match Search is on: a marker next to the line number, no background.
+                                .children((this.search_current == Some(row)).then(|| {
+                                    div().absolute().left(px(5.)).top_0().bottom_0().flex().items_center().text_color(foreground).child("▸")
+                                }))
                                 .child(
                                     div()
                                         .w(px(GUTTER_WIDTH))
@@ -1077,7 +1098,7 @@ impl TabView {
                 theme.muted_foreground,
                 theme.border,
                 theme.list_hover,
-                theme.accent,
+                theme.info.opacity(if theme.is_dark() { 0.32 } else { 0.22 }),
                 theme.warning,
                 theme.secondary,
                 theme.muted.opacity(0.35),
