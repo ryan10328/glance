@@ -7,7 +7,7 @@ use glance_core::level::Level;
 
 use crate::level_style::LevelPalette;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::checkbox::Checkbox;
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -124,24 +124,24 @@ impl FilterBar {
     fn level_buttons(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let entity = cx.entity();
         let palette = LevelPalette::new(cx);
+        let theme = cx.theme();
+        let (muted_bg, border, fg) = (theme.secondary, theme.foreground.opacity(0.22), theme.foreground);
         let check = |id: String, label: &'static str, level: Option<Level>, tooltip: String, on: bool, f: Box<dyn Fn(&mut LevelFilter)>| {
             let entity = entity.clone();
             let style = palette.style(level);
-            Checkbox::new(SharedString::from(id))
-                .small()
-                .accessibility_label(label)
-                .child(
-                    // The label wears the Level's color from the Entry view; a hidden Level fades.
-                    div()
-                        .px_1()
-                        .rounded_sm()
-                        .when(!on, |s| s.opacity(0.45))
-                        .when_some(style.tint, |s, tint| s.bg(tint))
-                        .when(style.faded, |s| s.text_color(palette.muted()))
-                        .child(label),
-                )
-                .tooltip(tooltip)
-                .checked(on)
+            // A Level chip is its own switch: filled in the Level's color when shown, an outline when hidden.
+            div()
+                .id(SharedString::from(id))
+                .px_2()
+                .py(px(1.))
+                .rounded(px(4.))
+                .border_1()
+                .cursor_pointer()
+                .text_sm()
+                .when(on, |s| s.border_color(border).bg(style.tint.unwrap_or(muted_bg)).text_color(if style.faded { palette.muted() } else { fg }))
+                .when(!on, |s| s.border_color(border.opacity(0.5)).text_color(palette.muted().opacity(0.7)))
+                .child(label)
+                .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
                 .on_click(move |_, _, cx| {
                     entity.update(cx, |this, cx| {
                         f(&mut this.levels);
@@ -150,7 +150,7 @@ impl FilterBar {
                     });
                 })
         };
-        let mut row = h_flex().gap_3().items_center().child(div().w(px(48.)).text_color(cx.theme().muted_foreground).child("Level"));
+        let mut row = h_flex().gap_1().items_center().child(Self::label("Level", cx.theme().muted_foreground));
         for level in Level::ALL {
             let on = self.levels.accepts(Some(level));
             row = row.child(check(format!("lv-{}", level.as_str()), level.as_str(), Some(level), format!("Show {} entries", level.as_str()), on, Box::new(move |l| flip_level(l, level))));
@@ -168,23 +168,55 @@ impl FilterBar {
             }),
         ));
         let warn_up = LevelFilter::at_least(Level::Warn, true);
+        let (primary, primary_fg, muted_text) = {
+            let theme = cx.theme();
+            (theme.primary, theme.primary_foreground, theme.muted_foreground)
+        };
         let all = self.levels == LevelFilter::default();
         let warn_on = self.levels == warn_up;
-        row.child(
-            flag("lv-all".into(), "All", "Show every level, including entries without one. Click again to switch back.", all).on_click(
-                cx.listener(|this, _, _, cx| {
-                    // Without an earlier selection to go back to, switching off shows no level at all.
-                    this.toggle_preset(LevelFilter::default(), LevelFilter::only(&[], false), cx);
-                }),
-            ),
-        )
-        .child(
-            flag("lv-warn-up".into(), "WARN and above", "Show WARN, ERROR and FATAL only. Click again to switch back.", warn_on).on_click(
-                cx.listener(move |this, _, _, cx| {
-                    this.toggle_preset(warn_up.clone(), LevelFilter::default(), cx);
-                }),
-            ),
-        )
+        let segment = |id: &'static str, label: &'static str, tooltip: &'static str, on: bool| {
+            div()
+                .id(id)
+                .px_2()
+                .py(px(1.))
+                .cursor_pointer()
+                .text_sm()
+                .when(on, |s| s.bg(primary).text_color(primary_fg))
+                .when(!on, |s| s.text_color(muted_text))
+                .child(label)
+                .tooltip(move |window, cx| Tooltip::new(tooltip).build(window, cx))
+        };
+        let segmented = h_flex()
+            .ml_2()
+            .rounded(px(4.))
+            .border_1()
+            .border_color(border)
+            .overflow_hidden()
+            .child(
+                segment("lv-all", "All", "Show every level, including entries without one. Click again to switch back.", all).on_click(cx.listener(
+                    |this, _, _, cx| {
+                        // Without an earlier selection to go back to, switching off shows no level at all.
+                        this.toggle_preset(LevelFilter::default(), LevelFilter::only(&[], false), cx);
+                    },
+                )),
+            )
+            .child(
+                div().border_l_1().border_color(border).child(
+                    segment("lv-warn-up", "WARN+", "Show WARN, ERROR and FATAL only. Click again to switch back.", warn_on).on_click(cx.listener(
+                        move |this, _, _, cx| {
+                            this.toggle_preset(warn_up.clone(), LevelFilter::default(), cx);
+                        },
+                    )),
+                ),
+            );
+        row.child(segmented)
+            .child(div().flex_1())
+            .child(Button::new("apply").xsmall().primary().label("Apply ⏎").tooltip("Apply the text conditions (Enter)").on_click(
+                cx.listener(|this, _, _, cx| this.apply(cx)),
+            ))
+            .child(Button::new("clear").xsmall().outline().label("Clear all").tooltip("Reset the Levels and remove every condition").on_click(
+                cx.listener(|this, _, window, cx| this.clear(window, cx)),
+            ))
     }
 
     /// Switches a preset on, remembering the selection it replaced; switching it
@@ -220,6 +252,16 @@ fn flag(id: SharedString, label: &'static str, tooltip: &'static str, on: bool) 
     if on { button.primary() } else { button.ghost() }
 }
 
+/// Width of the row labels (`Level`, `Text`, `Highlight`), shared so the rows line up.
+pub const LABEL_WIDTH: f32 = 64.0;
+
+impl FilterBar {
+    /// A row label: small and muted so it does not outweigh the controls it names.
+    pub fn label(text: &'static str, color: Hsla) -> Div {
+        div().w(px(LABEL_WIDTH)).flex_none().text_sm().text_color(color).child(text)
+    }
+}
+
 impl Render for FilterBar {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let muted = cx.theme().muted_foreground;
@@ -234,7 +276,7 @@ impl Render for FilterBar {
                 h_flex()
                     .gap_1()
                     .items_center()
-                    .child(div().w(px(48.)).text_color(muted).child(if i == 0 { "Text" } else { "" }))
+                    .child(Self::label(if i == 0 { "Text" } else { "" }, muted))
                     .child(Self::sized(&row.input, 280.))
                     .child(flag(format!("aa-{i}").into(), "Aa Match case", "Case-sensitive matching", row.case_sensitive).on_click(
                         cx.listener(move |this, _, _, cx| {
@@ -282,17 +324,6 @@ impl Render for FilterBar {
             .gap_1()
             .child(self.level_buttons(cx))
             .children(text_rows)
-            .child(
-                h_flex()
-                    .gap_2()
-                    .items_center()
-                    .child(Button::new("apply").xsmall().primary().label("Apply ⏎").tooltip("Apply the Filter (Enter)").on_click(
-                        cx.listener(|this, _, _, cx| this.apply(cx)),
-                    ))
-                    .child(Button::new("clear").xsmall().outline().label("Clear all").tooltip("Remove every condition").on_click(
-                        cx.listener(|this, _, window, cx| this.clear(window, cx)),
-                    ))
-                    .children(self.error.clone().map(|e| div().text_color(danger).child(e))),
-            )
+            .children(self.error.clone().map(|e| div().pl(px(LABEL_WIDTH)).text_color(danger).child(e)))
     }
 }

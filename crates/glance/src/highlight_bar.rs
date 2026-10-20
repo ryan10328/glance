@@ -128,7 +128,7 @@ impl Render for HighlightBar {
                 h_flex()
                     .gap_1()
                     .items_center()
-                    .child(div().w(px(72.)).text_color(muted).child(if i == 0 { "Highlight" } else { "" }))
+                    .child(crate::filter_bar::FilterBar::label(if i == 0 { "Highlight" } else { "" }, muted))
                     .child(div().w(px(240.)).child(Input::new(&row.input).small()))
                     .child(flag(format!("hl-aa-{i}").into(), "Aa Match case", "Case-sensitive matching", row.case_sensitive).on_click(
                         cx.listener(move |this, _, _, cx| {
@@ -159,7 +159,7 @@ impl Render for HighlightBar {
             })
             .collect();
         v_flex().gap_1().children(rows).when(count == 0, |s| {
-            s.child(h_flex().gap_1().items_center().child(div().w(px(72.)).text_color(muted).child("Highlight")).child(add(cx)))
+            s.child(h_flex().gap_1().items_center().child(crate::filter_bar::FilterBar::label("Highlight", muted)).child(add(cx)))
         })
     }
 }
