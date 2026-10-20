@@ -26,7 +26,7 @@ Multi-file merged timeline, OS file association, saving Filter results to a file
 - [x] 13. Follow Tail UI
 - [x] 14a. Detail panel: full Entry, Copy entry, Search marks
 - [x] 18. UI polish from the design critique (18a to 18g)
-- [ ] 14b. Detail panel: copy a field value, Show Context
+- [ ] 14b. Detail panel: copy a field value, Show Context (on hold: the maintainer does not need it now)
 - [ ] 15. Keyboard shortcuts
 - [ ] 16. Bookmarks (low priority)
 - [ ] 17. Third-party license notices (before the first binary release)
@@ -96,7 +96,7 @@ Multi-file merged timeline, OS file association, saving Filter results to a file
 
 ### 14. Detail panel (ui), in two steps
 - 14a: a panel to the right of the Entry view (resizable, about 360 px) that shows the selected Entry in full: pretty-printed JSON for JSON lines, all lines otherwise. It appears while something is selected and can be closed with `×` until the selection changes. Search occurrences and Highlight Rules are shown in every line (the Entry view marks only the first). With several Entries selected it shows the last clicked one and "N selected". "Copy entry" copies the selection. Long lines wrap by default (`wrap_long_lines`, also a checkbox in Settings); with wrapping off the body has scrollbars. The list marks Entries with more to see (`⋯ +N lines`, and `{ } N fields` for a JSON object too long for its row). "Copy entry" answers with "✓ Copied" for a moment.
-- 14b: copy a single field value of a JSON Entry (a `Copy` button on the hovered line); "Show Context" for a single Entry (moved from ticket 11): the Entries around the selected one, without a Filter.
+- 14b (on hold; a design is ready if it comes back: "Show in full log" as a temporary lift of the Filter with a "Back to filtered view" bar, and a hover Copy on each JSON field line): copy a single field value of a JSON Entry (a `Copy` button on the hovered line); "Show Context" for a single Entry (moved from ticket 11): the Entries around the selected one, without a Filter.
 
 ### 15. Keyboard shortcuts (ui)
 - Jump to the next ERROR-or-above Entry (moved from ticket 11).
@@ -120,4 +120,4 @@ Source: a design review of screenshots on 2026-10-20 (Operate mode; rough Nielse
 - 18e. (done: Copy in the header, time and size in the header, wrapping only between words, a clearer resize edge) Detail panel: move `Copy entry` into the header next to `×`; show time and size in the header; avoid breaking lines in the middle of a token such as `path=/api/orders`; make the resize edge discoverable.
 - 18f. (done except tooltip placement, left as is: a tooltip has to cover the row above or below) Small fixes: the Settings `Context` hint is clipped; thousands separators in the Search results header (`61,108`, as in the Search bar); the footer `plain text ▾` looks like a menu but toggles the Format; tooltips overlapping the Level row; make the Follow button more visible.
 - 18g. (done) Selection style: a selected row is blue (no Level uses blue) with a 1 px edge line where the selection starts and ends, and keeps its Level stripe; the row Search is on shows a `▸` marker and a faint edge line instead of a background. Row painting must not take a second read lock on the Entry index (a nested read can deadlock against the indexing thread).
-- Still open after this ticket, in order: 14b, 15 (keyboard shortcuts), 16 (Bookmarks), 17 (license notices).
+- Still open after this ticket, in order: 15 (keyboard shortcuts), 16 (Bookmarks), 17 (license notices). 14b is on hold.
