@@ -25,6 +25,7 @@ Multi-file merged timeline, OS file association, saving Filter results to a file
 - [x] 12c. Settings window
 - [x] 13. Follow Tail UI
 - [x] 14a. Detail panel: full Entry, Copy entry, Search marks
+- [ ] 18. UI polish from the design critique (planned before 14b; order inside it is decided one by one)
 - [ ] 14b. Detail panel: copy a field value, Show Context
 - [ ] 15. Keyboard shortcuts
 - [ ] 16. Bookmarks (low priority)
@@ -109,3 +110,13 @@ Multi-file merged timeline, OS file association, saving Filter results to a file
 - Generate `THIRD-PARTY-NOTICES` with `cargo-about` and ship it with the binaries.
 - Add `cargo-deny` with an allow-list of licenses so a copyleft dependency (GPL and the like) cannot slip in unnoticed. Dual-licensed crates such as `r-efi` and `self_cell` are fine through their permissive option.
 - Neither tool is installed yet; ask before installing.
+
+### 18. UI polish from the design critique (ui)
+Source: a design review of screenshots on 2026-10-20 (Operate mode; rough Nielsen score 25/40). Every item changes the UI, so each starts with an ASCII mockup and waits for confirmation. The suggested order is the first three, which pay off most; the rest follow as wanted.
+- 18a. Separate the toolbar from the list: a slightly lighter toolbar surface with a bottom border (the dark theme shows no boundary today).
+- 18b. Tighten the toolbar (about 230 px and four rows today): keep `Apply` / `Clear all` from wrapping onto their own line; give the row labels (`Level`, `Text`, `Highlight`) the same small size as the controls instead of larger; consider Level chips that toggle directly (no checkboxes) and `All | WARN+` as one segmented control.
+- 18c. Row color in the Entry view: replace the heavy full-row WARN tint (olive in the dark theme) with a 3 px severity stripe plus a faint tint, and keep the stripe when a row is selected (selection currently hides the Level color).
+- 18d. One on/off style for every toggle (`Aa`, `.*`, `¬`, `All`, `WARN+`); show an "unapplied" hint when the Filter inputs changed but `Apply` was not pressed.
+- 18e. Detail panel: move `Copy entry` into the header next to `×`; show time and size in the header; avoid breaking lines in the middle of a token such as `path=/api/orders`; make the resize edge discoverable.
+- 18f. Small fixes: the Settings `Context` hint is clipped; thousands separators in the Search results header (`61,108`, as in the Search bar); the footer `plain text ▾` looks like a menu but toggles the Format; tooltips overlapping the Level row; make the Follow button more visible.
+- Still open after this ticket, in order: 14b, 15 (keyboard shortcuts), 16 (Bookmarks), 17 (license notices).
