@@ -10,6 +10,7 @@ use gpui_kit::component::{ActiveTheme as _, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use crate::toggle::toggle;
 use crate::tab_view::color_of;
 
 pub enum HighlightBarEvent {
@@ -84,11 +85,6 @@ impl HighlightBar {
     }
 }
 
-fn flag(id: SharedString, label: &'static str, tooltip: &'static str, on: bool) -> Button {
-    let button = Button::new(id).xsmall().label(label).tooltip(tooltip);
-    if on { button.primary() } else { button.ghost() }
-}
-
 impl Render for HighlightBar {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let (muted, danger, ring) = (cx.theme().muted_foreground, cx.theme().danger, cx.theme().foreground);
@@ -130,13 +126,13 @@ impl Render for HighlightBar {
                     .items_center()
                     .child(crate::filter_bar::FilterBar::label(if i == 0 { "Highlight" } else { "" }, muted))
                     .child(div().w(px(240.)).child(Input::new(&row.input).small()))
-                    .child(flag(format!("hl-aa-{i}").into(), "Aa Match case", "Case-sensitive matching", row.case_sensitive).on_click(
+                    .child(toggle(SharedString::from(format!("hl-aa-{i}")), "Aa Match case", "Case-sensitive matching", row.case_sensitive, cx).on_click(
                         cx.listener(move |this, _, _, cx| {
                             this.rows[i].case_sensitive ^= true;
                             this.changed(cx);
                         }),
                     ))
-                    .child(flag(format!("hl-re-{i}").into(), ".* Regex", "Off: * and ? are wildcards. On: regular expression", row.regex).on_click(
+                    .child(toggle(SharedString::from(format!("hl-re-{i}")), ".* Regex", "Off: * and ? are wildcards. On: regular expression", row.regex, cx).on_click(
                         cx.listener(move |this, _, _, cx| {
                             this.rows[i].regex ^= true;
                             this.changed(cx);

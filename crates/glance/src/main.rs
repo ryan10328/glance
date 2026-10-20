@@ -6,6 +6,7 @@ mod search_bar;
 mod settings_window;
 mod theme;
 mod tab_view;
+mod toggle;
 
 use std::path::PathBuf;
 

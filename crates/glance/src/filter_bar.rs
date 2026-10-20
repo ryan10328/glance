@@ -6,6 +6,7 @@ use glance_core::filter::{
 use glance_core::level::Level;
 
 use crate::level_style::LevelPalette;
+use crate::toggle::{ToggleColors, toggle};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
@@ -35,6 +36,8 @@ pub struct FilterBar {
     /// Entries kept around each match; a setting, not a field of the bar.
     context: usize,
     error: Option<String>,
+    /// Text was typed and not applied yet.
+    dirty: bool,
 }
 
 impl FilterBar {
@@ -45,6 +48,7 @@ impl FilterBar {
             texts: Vec::new(),
             context: context.min(MAX_CONTEXT),
             error: None,
+            dirty: false,
         };
         bar.add_text_row(window, cx);
         bar
@@ -59,8 +63,13 @@ impl FilterBar {
     /// Enter or leaving the field applies the Filter.
     fn apply_on_enter(input: &Entity<InputState>, window: &mut Window, cx: &mut Context<Self>) {
         cx.subscribe_in(input, window, |this, _, event: &InputEvent, _, cx| {
-            if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
-                this.apply(cx);
+            match event {
+                InputEvent::Change => {
+                    this.dirty = true;
+                    cx.notify();
+                }
+                InputEvent::PressEnter { .. } | InputEvent::Blur => this.apply(cx),
+                _ => {}
             }
         })
         .detach();
@@ -93,6 +102,7 @@ impl FilterBar {
         match self.build(cx) {
             Ok(filter) => {
                 self.error = None;
+                self.dirty = false;
                 cx.emit(FilterBarEvent::Apply(filter));
             }
             Err(e) => self.error = Some(e),
@@ -117,6 +127,7 @@ impl FilterBar {
         self.texts.clear();
         self.add_text_row(window, cx);
         self.error = None;
+        self.dirty = false;
         cx.emit(FilterBarEvent::Apply(Filter::default()));
         cx.notify();
     }
@@ -168,10 +179,8 @@ impl FilterBar {
             }),
         ));
         let warn_up = LevelFilter::at_least(Level::Warn, true);
-        let (primary, primary_fg, muted_text) = {
-            let theme = cx.theme();
-            (theme.primary, theme.primary_foreground, theme.muted_foreground)
-        };
+        let tc = ToggleColors::new(cx);
+        let muted_text = cx.theme().muted_foreground;
         let all = self.levels == LevelFilter::default();
         let warn_on = self.levels == warn_up;
         let segment = |id: &'static str, label: &'static str, tooltip: &'static str, on: bool| {
@@ -181,7 +190,7 @@ impl FilterBar {
                 .py(px(1.))
                 .cursor_pointer()
                 .text_sm()
-                .when(on, |s| s.bg(primary).text_color(primary_fg))
+                .when(on, |s| s.bg(tc.on_fill))
                 .when(!on, |s| s.text_color(muted_text))
                 .child(label)
                 .tooltip(move |window, cx| Tooltip::new(tooltip).build(window, cx))
@@ -190,7 +199,7 @@ impl FilterBar {
             .ml_2()
             .rounded(px(4.))
             .border_1()
-            .border_color(border)
+            .border_color(tc.off_edge)
             .overflow_hidden()
             .child(
                 segment("lv-all", "All", "Show every level, including entries without one. Click again to switch back.", all).on_click(cx.listener(
@@ -201,7 +210,7 @@ impl FilterBar {
                 )),
             )
             .child(
-                div().border_l_1().border_color(border).child(
+                div().border_l_1().border_color(tc.off_edge).child(
                     segment("lv-warn-up", "WARN+", "Show WARN, ERROR and FATAL only. Click again to switch back.", warn_on).on_click(cx.listener(
                         move |this, _, _, cx| {
                             this.toggle_preset(warn_up.clone(), LevelFilter::default(), cx);
@@ -211,9 +220,14 @@ impl FilterBar {
             );
         row.child(segmented)
             .child(div().flex_1())
-            .child(Button::new("apply").xsmall().primary().label("Apply ⏎").tooltip("Apply the text conditions (Enter)").on_click(
-                cx.listener(|this, _, _, cx| this.apply(cx)),
-            ))
+            .child({
+                // Typed text waits for Apply; everything else applies at once.
+                let apply = Button::new("apply").xsmall().label(if self.dirty { "Apply ⏎ ●" } else { "Apply ⏎" }).tooltip(
+                    if self.dirty { "The text has changed and is not applied yet (Enter)" } else { "Apply the text conditions (Enter)" },
+                );
+                let apply = if self.dirty { apply.primary() } else { apply.outline() };
+                apply.on_click(cx.listener(|this, _, _, cx| this.apply(cx)))
+            })
             .child(Button::new("clear").xsmall().outline().label("Clear all").tooltip("Reset the Levels and remove every condition").on_click(
                 cx.listener(|this, _, window, cx| this.clear(window, cx)),
             ))
@@ -247,11 +261,6 @@ fn flip_level(levels: &mut LevelFilter, level: Level) {
     *levels = LevelFilter::only(&allowed, levels.accepts(None));
 }
 
-fn flag(id: SharedString, label: &'static str, tooltip: &'static str, on: bool) -> Button {
-    let button = Button::new(id).xsmall().label(label).tooltip(tooltip);
-    if on { button.primary() } else { button.ghost() }
-}
-
 /// Width of the row labels (`Level`, `Text`, `Highlight`), shared so the rows line up.
 pub const LABEL_WIDTH: f32 = 64.0;
 
@@ -278,19 +287,19 @@ impl Render for FilterBar {
                     .items_center()
                     .child(Self::label(if i == 0 { "Text" } else { "" }, muted))
                     .child(Self::sized(&row.input, 280.))
-                    .child(flag(format!("aa-{i}").into(), "Aa Match case", "Case-sensitive matching", row.case_sensitive).on_click(
+                    .child(toggle(SharedString::from(format!("aa-{i}")), "Aa Match case", "Case-sensitive matching", row.case_sensitive, cx).on_click(
                         cx.listener(move |this, _, _, cx| {
                             this.texts[i].case_sensitive ^= true;
                             this.apply(cx);
                         }),
                     ))
-                    .child(flag(format!("re-{i}").into(), ".* Regex", "Off: * and ? are wildcards. On: regular expression", row.regex).on_click(
+                    .child(toggle(SharedString::from(format!("re-{i}")), ".* Regex", "Off: * and ? are wildcards. On: regular expression", row.regex, cx).on_click(
                         cx.listener(move |this, _, _, cx| {
                             this.texts[i].regex ^= true;
                             this.apply(cx);
                         }),
                     ))
-                    .child(flag(format!("not-{i}").into(), "¬ Exclude", "Hide entries that match (NOT)", row.exclude).on_click(
+                    .child(toggle(SharedString::from(format!("not-{i}")), "¬ Exclude", "Hide entries that match (NOT)", row.exclude, cx).on_click(
                         cx.listener(move |this, _, _, cx| {
                             this.texts[i].exclude ^= true;
                             this.apply(cx);

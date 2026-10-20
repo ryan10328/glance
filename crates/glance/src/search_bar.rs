@@ -1,5 +1,6 @@
 //! The Search controls: query box, `Aa` / `.*` toggles, match count and next/previous.
 
+use crate::toggle::toggle;
 use glance_core::filter::TextPattern;
 use glance_core::search::SearchQuery;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -75,11 +76,6 @@ impl SearchBar {
     }
 }
 
-fn flag(id: &'static str, label: &'static str, tooltip: &'static str, on: bool) -> Button {
-    let button = Button::new(id).xsmall().label(label).tooltip(tooltip);
-    if on { button.primary() } else { button.ghost() }
-}
-
 impl Render for SearchBar {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let (muted, danger) = (cx.theme().muted_foreground, cx.theme().danger);
@@ -95,11 +91,11 @@ impl Render for SearchBar {
                         .suffix(div().pr_1().text_xs().text_color(if self.invalid { danger } else { muted }).child(self.status.clone())),
                 ),
             )
-            .child(flag("search-aa", "Aa Match case", "Case-sensitive matching", self.case_sensitive).on_click(cx.listener(|this, _, _, cx| {
+            .child(toggle("search-aa", "Aa Match case", "Case-sensitive matching", self.case_sensitive, cx).on_click(cx.listener(|this, _, _, cx| {
                 this.case_sensitive ^= true;
                 this.changed(cx);
             })))
-            .child(flag("search-re", ".* Regex", "Off: * and ? are wildcards. On: regular expression", self.regex).on_click(cx.listener(|this, _, _, cx| {
+            .child(toggle("search-re", ".* Regex", "Off: * and ? are wildcards. On: regular expression", self.regex, cx).on_click(cx.listener(|this, _, _, cx| {
                 this.regex ^= true;
                 this.changed(cx);
             })))
