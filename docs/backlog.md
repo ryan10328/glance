@@ -113,7 +113,7 @@ Multi-file merged timeline, OS file association, saving Filter results to a file
 
 ### 18. UI polish from the design critique (ui)
 Source: a design review of screenshots on 2026-10-20 (Operate mode; rough Nielsen score 25/40). Every item changes the UI, so each starts with an ASCII mockup and waits for confirmation. The suggested order is the first three, which pay off most; the rest follow as wanted.
-- 18a. Separate the toolbar from the list: a slightly lighter toolbar surface with a bottom border (the dark theme shows no boundary today).
+- 18a. (done) Separate the toolbar from the list: the toolbar sits on the theme's `secondary` surface with a bottom border drawn from the text color at 22% (the theme's own hairline was too faint in the dark theme).
 - 18b. Tighten the toolbar (about 230 px and four rows today): keep `Apply` / `Clear all` from wrapping onto their own line; give the row labels (`Level`, `Text`, `Highlight`) the same small size as the controls instead of larger; consider Level chips that toggle directly (no checkboxes) and `All | WARN+` as one segmented control.
 - 18c. Row color in the Entry view: replace the heavy full-row WARN tint (olive in the dark theme) with a 3 px severity stripe plus a faint tint, and keep the stripe when a row is selected (selection currently hides the Level color).
 - 18d. One on/off style for every toggle (`Aa`, `.*`, `¬`, `All`, `WARN+`); show an "unapplied" hint when the Filter inputs changed but `Apply` was not pressed.

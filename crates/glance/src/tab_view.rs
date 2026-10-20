@@ -1176,7 +1176,11 @@ impl TabView {
 
 impl Render for TabView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let border = cx.theme().border;
+        // The toolbar sits on its own surface; the theme's hairline is too faint to set it apart.
+        let (toolbar_bg, toolbar_border) = {
+            let theme = cx.theme();
+            (theme.secondary, theme.foreground.opacity(0.22))
+        };
         let shown = self.detail_entry();
         if shown != self.detail_for {
             self.detail_for = shown;
@@ -1193,8 +1197,9 @@ impl Render for TabView {
                     .px_3()
                     .py_2()
                     .gap_1()
+                    .bg(toolbar_bg)
                     .border_b_1()
-                    .border_color(border)
+                    .border_color(toolbar_border)
                     .child(self.filter_bar.clone())
                     .child(self.highlight_bar.clone())
                     .child(self.search_bar.clone()),
