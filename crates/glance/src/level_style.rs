@@ -20,6 +20,14 @@ pub struct LevelStyle {
     pub faded: bool,
 }
 
+/// How a row of the Entry list marks its Level: a stripe on the left edge and a faint tint.
+pub struct RowStyle {
+    pub tint: Option<Hsla>,
+    /// Color and width in pixels.
+    pub stripe: Option<(Hsla, f32)>,
+    pub faded: bool,
+}
+
 impl LevelPalette {
     pub fn new(cx: &App) -> Self {
         let theme = cx.theme();
@@ -40,5 +48,17 @@ impl LevelPalette {
             _ => None,
         };
         LevelStyle { tint, faded: matches!(level, Some(Level::Trace | Level::Debug)) }
+    }
+
+    /// Rows stay quiet: a stripe carries the severity and the tint only helps it.
+    pub fn row_style(&self, level: Option<Level>) -> RowStyle {
+        let (mild, strong) = if self.dark { (0.13, 0.26) } else { (0.15, 0.28) };
+        let (tint, stripe) = match level {
+            Some(Level::Warn) => (Some(self.warn.opacity(mild)), Some((self.warn, 3.0))),
+            Some(Level::Error) => (Some(self.danger.opacity(mild)), Some((self.danger, 3.0))),
+            Some(Level::Fatal) => (Some(self.danger.opacity(strong)), Some((self.danger, 4.0))),
+            _ => (None, None),
+        };
+        RowStyle { tint, stripe, faded: matches!(level, Some(Level::Trace | Level::Debug)) }
     }
 }

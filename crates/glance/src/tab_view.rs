@@ -26,7 +26,7 @@ use jiff::tz::TimeZone;
 
 use crate::filter_bar::{FilterBar, FilterBarEvent};
 use crate::highlight_bar::HighlightBar;
-use crate::level_style::{LevelPalette, LevelStyle};
+use crate::level_style::{LevelPalette, LevelStyle, RowStyle};
 use crate::search_bar::{SearchBar, SearchBarEvent};
 
 actions!(glance, [CopySelection, OpenSearch, CloseSearch]);
@@ -810,7 +810,7 @@ impl TabView {
                             summary.map_or((String::new(), 0, false, false), |s| (s.first_line, s.extra_lines, s.more, s.truncated));
                         max_chars.set(max_chars.get().max(text.chars().count() + 12));
                         let level = parse_entry(this.ctx.format, this.ctx.rule, text.as_bytes(), &this.ctx.zone).level;
-                        let LevelStyle { tint, faded } = palette.style(level);
+                        let RowStyle { tint, stripe, faded } = palette.row_style(level);
                         // Search matches get a background; the user's Highlight Rules color the text.
                         let search_ranges = this.search.as_ref().map(|s| s.occurrences(text.as_bytes())).unwrap_or_default();
                         let found = merge_highlights(&text, search_ranges, highlighter.text_spans(text.as_bytes()), dark, found_bg.opacity(0.55));
@@ -825,6 +825,7 @@ impl TabView {
                         Some(
                             h_flex()
                                 .id(("row", row))
+                                .relative()
                                 .h(px(row_height))
                                 .w_full()
                                 .flex_none()
@@ -833,6 +834,7 @@ impl TabView {
                                 .when(selection.contains(entry_no), |s| s.bg(selected_bg))
                                 .when(this.search_current == Some(row), |s| s.bg(current_bg))
                                 .hover(|s| s.bg(hover_bg))
+                                .children(stripe.map(|(color, width)| div().absolute().left_0().top_0().bottom_0().w(px(width)).bg(color)))
                                 .child(
                                     div()
                                         .w(px(GUTTER_WIDTH))
@@ -1094,7 +1096,7 @@ impl TabView {
                         let entry_no = *results.entries.get(i)?;
                         let text = entry::read_summary(&index, &reader, entry_no).ok().flatten().map(|s| s.first_line).unwrap_or_default();
                         let level = parse_entry(this.ctx.format, this.ctx.rule, text.as_bytes(), &this.ctx.zone).level;
-                        let LevelStyle { tint, faded } = palette.style(level);
+                        let RowStyle { tint, stripe, faded } = palette.row_style(level);
                         let found = merge_highlights(
                             &text,
                             results.search.occurrences(text.as_bytes()),
@@ -1105,6 +1107,7 @@ impl TabView {
                         Some(
                             h_flex()
                                 .id(("result", i))
+                                .relative()
                                 .h(px(row_height))
                                 .w_full()
                                 .flex_none()
@@ -1112,6 +1115,7 @@ impl TabView {
                                 .when_some(tint, |s, tint| s.bg(tint))
                                 .when(this.results_current == Some(i), |s| s.bg(current_bg))
                                 .hover(|s| s.bg(hover_bg))
+                                .children(stripe.map(|(color, width)| div().absolute().left_0().top_0().bottom_0().w(px(width)).bg(color)))
                                 .child(div().w(px(GUTTER_WIDTH)).flex_none().pr_3().text_right().text_color(muted).child((entry_no + 1).to_string()))
                                 .child(
                                     div()
