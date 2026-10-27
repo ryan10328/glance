@@ -32,7 +32,8 @@ use crate::search_bar::{SearchBar, SearchBarEvent};
 actions!(glance, [CopySelection, OpenSearch, CloseSearch]);
 
 pub const DEFAULT_FONT_SIZE: f32 = 13.0;
-const GUTTER_WIDTH: f32 = 72.0;
+/// Narrowest line number column, enough for six digits at the default size.
+const MIN_GUTTER_WIDTH: f32 = 72.0;
 /// Lines of one Entry the detail panel renders.
 const DETAIL_MAX_LINES: usize = 5000;
 /// Largest selection that can be copied at once.
@@ -172,6 +173,11 @@ fn clip_highlights(all: &[(Range<usize>, HighlightStyle)], segment: &Range<usize
 }
 
 /// `81799` becomes `81,799`.
+/// Width for `digits` line number digits: a digit is about 0.62 em wide, plus the right padding (12 px) and room for the severity stripe and the Search marker.
+fn gutter_width_for(digits: usize, font_size: f32) -> f32 {
+    (digits as f32 * font_size * 0.62 + 12.0 + 14.0).ceil().max(MIN_GUTTER_WIDTH)
+}
+
 fn group_digits(n: usize) -> String {
     let digits = n.to_string();
     let mut out = String::with_capacity(digits.len() + digits.len() / 3);
@@ -411,6 +417,12 @@ impl TabView {
             Some((_, view)) => view.len(),
             None => self.file.index().read().unwrap().len(),
         }
+    }
+
+    /// Width of the line number column: wide enough for the last Entry number, with room for the stripe and the right padding.
+    fn gutter_width(&self, font_size: f32) -> f32 {
+        let last = self.file.index().read().unwrap().len().max(1);
+        gutter_width_for(last.to_string().len(), font_size)
     }
 
     fn row_at(&self, row: usize) -> Option<ViewRow> {
@@ -814,6 +826,7 @@ impl TabView {
 
     fn render_entry_view(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let count = self.row_count();
+        let gutter_width = self.gutter_width(self.font_size());
         let index = self.file.index().clone();
         let reader = self.file.reader().clone();
         let selection = self.selection.clone();
@@ -897,7 +910,7 @@ impl TabView {
                                 }))
                                 .child(
                                     div()
-                                        .w(px(GUTTER_WIDTH))
+                                        .w(px(gutter_width))
                                         .flex_none()
                                         .pr_3()
                                         .text_right()
@@ -1138,6 +1151,7 @@ impl TabView {
 
     fn render_results(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let results = self.results.as_ref()?;
+        let gutter_width = self.gutter_width(self.font_size());
         let count = results.entries.len();
         let header = format!("Search results · \"{}\" · {} match{}", results.label, group_digits(count), if count == 1 { "" } else { "es" });
         let index = self.file.index().clone();
@@ -1193,7 +1207,7 @@ impl TabView {
                                 .when(this.results_current == Some(i), |s| s.bg(current_bg))
                                 .hover(|s| s.bg(hover_bg))
                                 .children(stripe.map(|(color, width)| div().absolute().left_0().top_0().bottom_0().w(px(width)).bg(color)))
-                                .child(div().w(px(GUTTER_WIDTH)).flex_none().pr_3().text_right().text_color(muted).child((entry_no + 1).to_string()))
+                                .child(div().w(px(gutter_width)).flex_none().pr_3().text_right().text_color(muted).child((entry_no + 1).to_string()))
                                 .child(
                                     div()
                                         .flex_1()
@@ -1320,8 +1334,17 @@ impl Render for TabView {
 
 #[cfg(test)]
 mod tests {
-    use super::{clip_highlights, group_digits, word_ranges};
+    use super::{MIN_GUTTER_WIDTH, clip_highlights, group_digits, gutter_width_for, word_ranges};
     use gpui_kit::HighlightStyle;
+
+    #[test]
+    fn gutter_grows_with_the_number_of_digits() {
+        assert_eq!(gutter_width_for(1, 13.0), MIN_GUTTER_WIDTH);
+        assert!(gutter_width_for(6, 13.0) >= MIN_GUTTER_WIDTH);
+        // Eight digits at 13 px need about 65 px for the number alone.
+        assert!(gutter_width_for(8, 13.0) > 65.0 + 12.0);
+        assert!(gutter_width_for(8, 20.0) > gutter_width_for(8, 13.0));
+    }
 
     #[test]
     fn lines_split_after_each_run_of_spaces() {
