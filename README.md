@@ -2,7 +2,9 @@
 
 A fast desktop log viewer built with Rust and [GPUI](https://www.gpui.rs/) via [gpui-kit](https://github.com/longbridge/gpui-kit).
 
-> **Status:** early development. There is no usable release yet.
+> **Status:** early development. There is no usable release yet, and things may change or break.
+>
+> **Platforms:** only tested on macOS so far. Linux and Windows are goals, but they have not been built or run; expect problems. If you run into one, please open an issue, or send a pull request (see [Contributing](#contributing)).
 
 > **Built entirely with AI.** Every line of code and documentation in this project was written by an AI assistant ([Claude Code](https://claude.com/claude-code)). The human maintainer only describes what is wanted and checks that the features work; the code itself has not been reviewed line by line.
 
@@ -13,7 +15,7 @@ A fast desktop log viewer built with Rust and [GPUI](https://www.gpui.rs/) via [
 - Search and filter by level and text (wildcard or regex).
 - Highlight entries by Level and color any text you choose.
 - Follow a file as it grows, like `tail -f`.
-- Run on macOS, Linux and Windows.
+- Run on macOS, Linux and Windows (macOS only for now).
 
 See [`docs/backlog.md`](docs/backlog.md) for the v1 plan, [`GLOSSARY.md`](GLOSSARY.md) for the project vocabulary, and [`docs/adr/`](docs/adr/) for architecture decisions.
 
