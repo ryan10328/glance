@@ -29,7 +29,7 @@ Multi-file merged timeline, OS file association, saving Filter results to a file
 - [ ] 14b. Detail panel: copy a field value, Show Context (on hold: the maintainer does not need it now)
 - [ ] 15. Keyboard shortcuts
 - [ ] 16. Bookmarks (low priority)
-- [ ] 17. Third-party license notices (before the first binary release)
+- [x] 17. Third-party license notices (tooling set up; generate and ship `THIRD-PARTY-NOTICES.md` with the first binary release)
 
 ## Tickets
 
@@ -107,9 +107,10 @@ Multi-file merged timeline, OS file association, saving Filter results to a file
 
 ### 17. Third-party license notices (before the first binary release)
 - Source-only releases need nothing; a binary release must ship the licenses of what it contains. gpui-kit and GPUI are Apache-2.0, its bundled icons come from Lucide (ISC, with a Feather MIT notice), and a few dependencies are MPL-2.0 (`dwrote`, `option-ext`; unmodified, so only the source has to stay obtainable).
-- Generate `THIRD-PARTY-NOTICES` with `cargo-about` and ship it with the binaries.
-- Add `cargo-deny` with an allow-list of licenses so a copyleft dependency (GPL and the like) cannot slip in unnoticed. Dual-licensed crates such as `r-efi` and `self_cell` are fine through their permissive option.
-- Neither tool is installed yet; ask before installing.
+- Done: `about.toml` (accepted licenses and targets), `about.hbs` (Markdown template) and `deny.toml` (license allow-list, advisories, sources). Install with `cargo install --locked cargo-deny` and `cargo install --locked cargo-about --features cli` (the `cli` feature is required).
+- Check dependencies with `cargo deny check`. Unmaintained packages are only flagged for the workspace's own dependencies, because GPUI pulls in several that this project cannot replace. Keep the license list in `deny.toml` and `about.toml` the same.
+- Left for the first binary release: run `cargo about generate about.hbs > THIRD-PARTY-NOTICES.md` and ship that file with the binaries (it is not committed, as it is large and changes with every dependency update).
+- Optional: run `cargo deny check` in CI once CI exists.
 
 ### 18. UI polish from the design critique (ui)
 Source: a design review of screenshots on 2026-10-20 (Operate mode; rough Nielsen score 25/40). Every item changes the UI, so each starts with an ASCII mockup and waits for confirmation. The suggested order is the first three, which pay off most; the rest follow as wanted.
